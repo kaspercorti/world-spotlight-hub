@@ -111,16 +111,127 @@ function InvalidateOnResize() {
   return null;
 }
 
+type RawMarker = {
+  key: string;
+  incidentId?: string;
+  conflictId: string;
+  lat: number;
+  lng: number;
+  type: ConflictType;
+  severity: Severity;
+  title: string;
+  isHub: boolean;
+};
+
+// Spreads markers that overlap in screen-space into a small ring around the cluster center.
+function SpreadMarkers({
+  markers,
+  onSelect,
+}: {
+  markers: RawMarker[];
+  onSelect: (conflictId: string, incidentId?: string) => void;
+}) {
+  const map = useMap();
+  const [zoom, setZoom] = useState(map.getZoom());
+
+  useMapEvents({
+    zoomend: () => setZoom(map.getZoom()),
+    moveend: () => setZoom(map.getZoom()),
+  });
+
+  const positioned = useMemo(() => {
+    // Pixel threshold for "same place" — bigger when zoomed out
+    const threshold = 38;
+    type P = RawMarker & { px: number; py: number };
+    const pts: P[] = markers.map((m) => {
+      const p = map.project([m.lat, m.lng], zoom);
+      return { ...m, px: p.x, py: p.y };
+    });
+
+    // Greedy clustering by pixel distance
+    const clusters: P[][] = [];
+    const used = new Array(pts.length).fill(false);
+    for (let i = 0; i < pts.length; i++) {
+      if (used[i]) continue;
+      const cluster: P[] = [pts[i]];
+      used[i] = true;
+      for (let j = i + 1; j < pts.length; j++) {
+        if (used[j]) continue;
+        const dx = pts[i].px - pts[j].px;
+        const dy = pts[i].py - pts[j].py;
+        if (Math.sqrt(dx * dx + dy * dy) < threshold) {
+          cluster.push(pts[j]);
+          used[j] = true;
+        }
+      }
+      clusters.push(cluster);
+    }
+
+    const out: { marker: RawMarker; lat: number; lng: number }[] = [];
+    for (const cluster of clusters) {
+      if (cluster.length === 1) {
+        const m = cluster[0];
+        out.push({ marker: m, lat: m.lat, lng: m.lng });
+        continue;
+      }
+      // Center of the cluster in pixel space
+      const cx = cluster.reduce((s, p) => s + p.px, 0) / cluster.length;
+      const cy = cluster.reduce((s, p) => s + p.py, 0) / cluster.length;
+      const radius = Math.max(threshold * 0.75, cluster.length * 8);
+      // Stable sort: hubs first, then by id so order is deterministic
+      const sorted = [...cluster].sort((a, b) => {
+        if (a.isHub !== b.isHub) return a.isHub ? -1 : 1;
+        return a.key.localeCompare(b.key);
+      });
+      for (let i = 0; i < sorted.length; i++) {
+        const angle = (i / sorted.length) * Math.PI * 2 - Math.PI / 2;
+        const px = cx + Math.cos(angle) * radius;
+        const py = cy + Math.sin(angle) * radius;
+        const ll = map.unproject([px, py], zoom);
+        out.push({ marker: sorted[i], lat: ll.lat, lng: ll.lng });
+      }
+    }
+    return out;
+  }, [markers, map, zoom]);
+
+  return (
+    <>
+      {positioned.map(({ marker, lat, lng }) => (
+        <Marker
+          key={marker.key}
+          position={[lat, lng]}
+          icon={makeIcon(marker.type, marker.severity, { small: !marker.isHub })}
+          title={marker.title}
+          eventHandlers={{ click: () => onSelect(marker.conflictId, marker.incidentId) }}
+        />
+      ))}
+    </>
+  );
+}
+
 export function ConflictMap({ conflicts, selectedId, activeTypes, onSelect }: Props) {
   const selected = conflicts.find((c) => c.id === selectedId) ?? null;
   const typeAllowed = (t: ConflictType) => !activeTypes || activeTypes.has(t);
 
-  // Build per-incident markers (deterministic small offset for those without explicit coords)
-  const incidentMarkers = useMemo(() => {
-    const items: { key: string; incidentId: string; lat: number; lng: number; type: ConflictType; severity: Severity; conflictId: string; title: string }[] = [];
+  // Build a unified marker list (hubs + incidents) that the spreader can lay out.
+  const allMarkers = useMemo<RawMarker[]>(() => {
+    const items: RawMarker[] = [];
     for (const c of conflicts) {
+      if (typeAllowed(c.type)) {
+        items.push({
+          key: `hub-${c.id}`,
+          conflictId: c.id,
+          lat: c.lat,
+          lng: c.lng,
+          type: c.type,
+          severity: c.severity,
+          title: `${c.name} — ${typeLabel[c.type]}`,
+          isHub: true,
+        });
+      }
       for (let i = 0; i < c.recent.length; i++) {
         const ev = c.recent[i];
+        if (!typeAllowed(ev.type)) continue;
         let lat = ev.lat;
         let lng = ev.lng;
         if (lat == null || lng == null) {
@@ -132,17 +243,19 @@ export function ConflictMap({ conflicts, selectedId, activeTypes, onSelect }: Pr
         items.push({
           key: `${c.id}-${ev.id}`,
           incidentId: ev.id,
+          conflictId: c.id,
           lat,
           lng,
           type: ev.type,
           severity: c.severity,
-          conflictId: c.id,
           title: `${ev.title} — ${typeLabel[ev.type]}`,
+          isHub: false,
         });
       }
     }
     return items;
-  }, [conflicts]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conflicts, activeTypes]);
 
   return (
     <div className="absolute inset-0 bg-background">
@@ -163,26 +276,7 @@ export function ConflictMap({ conflicts, selectedId, activeTypes, onSelect }: Pr
           subdomains={["a", "b", "c", "d"]}
           maxZoom={19}
         />
-        {/* Conflict hub markers — only when the conflict's own type matches a selected filter */}
-        {conflicts.filter((c) => typeAllowed(c.type)).map((c) => (
-          <Marker
-            key={c.id}
-            position={[c.lat, c.lng]}
-            icon={makeIcon(c.type, c.severity)}
-            title={`${c.name} — ${typeLabel[c.type]}`}
-            eventHandlers={{ click: () => onSelect(c.id) }}
-          />
-        ))}
-        {/* Per-incident markers — only those matching selected types */}
-        {incidentMarkers.filter((m) => typeAllowed(m.type)).map((m) => (
-          <Marker
-            key={m.key}
-            position={[m.lat, m.lng]}
-            icon={makeIcon(m.type, m.severity, { small: true })}
-            title={m.title}
-            eventHandlers={{ click: () => onSelect(m.conflictId, m.incidentId) }}
-          />
-        ))}
+        <SpreadMarkers markers={allMarkers} onSelect={onSelect} />
         <FlyTo conflict={selected} />
         <InvalidateOnResize />
       </MapContainer>
