@@ -106,12 +106,11 @@ export function ConflictMap({ conflicts, selectedId, onSelect }: Props) {
         attributionControl={true}
         className="h-full w-full"
       >
-        {/* Robust, well-cached tile source — avoids the black-tile issue */}
+        {/* OpenStreetMap — no API key required, reliable */}
         <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://stadiamaps.com/">Stadia Maps</a>'
-          url="https://tiles.stadiamaps.com/tiles/alidade_smooth_dark/{z}/{x}/{y}{r}.png"
-          maxZoom={20}
-          crossOrigin
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+          url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+          maxZoom={19}
         />
         {conflicts.map((c) => (
           <Marker
