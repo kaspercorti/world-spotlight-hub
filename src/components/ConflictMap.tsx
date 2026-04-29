@@ -1,7 +1,7 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { MapContainer, TileLayer, Marker, useMap } from "react-leaflet";
 import L from "leaflet";
-import type { Conflict, ConflictType } from "@/data/conflicts";
+import type { Conflict, ConflictType, Severity } from "@/data/conflicts";
 import { severityMeta } from "@/lib/conflict-utils";
 
 interface Props {
@@ -50,15 +50,16 @@ const typeLabel: Record<ConflictType, string> = {
   airstrike: "Flyganfall",
 };
 
-function makeIcon(conflict: Conflict) {
-  const color = severityMeta[conflict.severity].color;
-  const intense = conflict.severity === "war" || conflict.severity === "active";
-  const glyph = typeGlyph[conflict.type];
-  const size = intense ? 36 : 30;
+function makeIcon(type: ConflictType, severity: Severity, opts?: { small?: boolean }) {
+  const color = severityMeta[severity].color;
+  const intense = severity === "war" || severity === "active";
+  const glyph = typeGlyph[type];
+  const base = opts?.small ? 24 : intense ? 36 : 30;
+  const size = base;
 
   const html = `
     <div class="conflict-marker" style="width:${size}px;height:${size}px;position:relative;">
-      ${intense ? `<div class="pulse" style="background:${color};opacity:.45;width:100%;height:100%;border-radius:50%;position:absolute;inset:0;"></div>` : ""}
+      ${intense && !opts?.small ? `<div class="pulse" style="background:${color};opacity:.45;width:100%;height:100%;border-radius:50%;position:absolute;inset:0;"></div>` : ""}
       <div style="
         position:absolute;inset:0;
         background:${color};
@@ -112,6 +113,35 @@ function InvalidateOnResize() {
 export function ConflictMap({ conflicts, selectedId, onSelect }: Props) {
   const selected = conflicts.find((c) => c.id === selectedId) ?? null;
 
+  // Build per-incident markers (deterministic small offset for those without explicit coords)
+  const incidentMarkers = useMemo(() => {
+    const items: { key: string; lat: number; lng: number; type: ConflictType; severity: Severity; conflictId: string; title: string }[] = [];
+    for (const c of conflicts) {
+      for (let i = 0; i < c.recent.length; i++) {
+        const ev = c.recent[i];
+        let lat = ev.lat;
+        let lng = ev.lng;
+        if (lat == null || lng == null) {
+          // small deterministic offset around the conflict center so they don't all overlap
+          const angle = (i / Math.max(c.recent.length, 1)) * Math.PI * 2;
+          const r = 0.9; // ~100km
+          lat = c.lat + Math.sin(angle) * r;
+          lng = c.lng + Math.cos(angle) * r;
+        }
+        items.push({
+          key: `${c.id}-${ev.id}`,
+          lat,
+          lng,
+          type: ev.type,
+          severity: c.severity,
+          conflictId: c.id,
+          title: `${ev.title} — ${typeLabel[ev.type]}`,
+        });
+      }
+    }
+    return items;
+  }, [conflicts]);
+
   return (
     <div className="absolute inset-0 bg-background">
       <MapContainer
@@ -125,20 +155,30 @@ export function ConflictMap({ conflicts, selectedId, onSelect }: Props) {
         className="h-full w-full"
         style={{ background: "hsl(220 25% 6%)" }}
       >
-        {/* CARTO dark basemap — free, no API key, matches command-center theme */}
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
           url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
           subdomains={["a", "b", "c", "d"]}
           maxZoom={19}
         />
+        {/* Conflict hub markers */}
         {conflicts.map((c) => (
           <Marker
             key={c.id}
             position={[c.lat, c.lng]}
-            icon={makeIcon(c)}
+            icon={makeIcon(c.type, c.severity)}
             title={`${c.name} — ${typeLabel[c.type]}`}
             eventHandlers={{ click: () => onSelect(c.id) }}
+          />
+        ))}
+        {/* Per-incident markers (smaller, exact location, type-specific icon) */}
+        {incidentMarkers.map((m) => (
+          <Marker
+            key={m.key}
+            position={[m.lat, m.lng]}
+            icon={makeIcon(m.type, m.severity, { small: true })}
+            title={m.title}
+            eventHandlers={{ click: () => onSelect(m.conflictId) }}
           />
         ))}
         <FlyTo conflict={selected} />

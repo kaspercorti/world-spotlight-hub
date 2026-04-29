@@ -21,6 +21,9 @@ export interface Incident {
   type: ConflictType;
   verification: Verification;
   source: string;
+  lat?: number;
+  lng?: number;
+  location?: string;
 }
 
 export interface Conflict {
@@ -328,10 +331,10 @@ export const conflicts: Conflict[] = [
     startedAt: "2023-01-01",
     sources: ["SVT", "Polisen"],
     recent: [
-      { id: "se1", timestamp: hoursAgo(2), title: "Explosion in Stockholm suburb", summary: "Detonation damages residential entrance; no fatalities reported.", type: "explosion", verification: "verified", source: "SVT" },
-      { id: "se2", timestamp: hoursAgo(5), title: "Shooting in Gothenburg", summary: "One person injured in suspected gang-related shooting.", type: "shooting", verification: "verified", source: "Polisen" },
-      { id: "se3", timestamp: hoursAgo(9), title: "Demonstration in central Stockholm", summary: "Several thousand march peacefully through the city center.", type: "protest", verification: "verified", source: "SVT" },
-      { id: "se4", timestamp: hoursAgo(14), title: "Arson attack on vehicle", summary: "Car set ablaze in Malmö; investigation ongoing.", type: "arson", verification: "partial", source: "Sydsvenskan" },
+      { id: "se1", timestamp: hoursAgo(2), title: "Explosion in Stockholm suburb", summary: "Detonation damages residential entrance; no fatalities reported.", type: "explosion", verification: "verified", source: "SVT", lat: 59.3293, lng: 18.0686, location: "Stockholm" },
+      { id: "se2", timestamp: hoursAgo(5), title: "Shooting in Gothenburg", summary: "One person injured in suspected gang-related shooting.", type: "shooting", verification: "verified", source: "Polisen", lat: 57.7089, lng: 11.9746, location: "Göteborg" },
+      { id: "se3", timestamp: hoursAgo(9), title: "Demonstration in central Stockholm", summary: "Several thousand march peacefully through the city center.", type: "protest", verification: "verified", source: "SVT", lat: 59.3326, lng: 18.0649, location: "Stockholm" },
+      { id: "se4", timestamp: hoursAgo(14), title: "Arson attack on vehicle", summary: "Car set ablaze in Malmö; investigation ongoing.", type: "arson", verification: "partial", source: "Sydsvenskan", lat: 55.6050, lng: 13.0038, location: "Malmö" },
     ],
   },
   {
