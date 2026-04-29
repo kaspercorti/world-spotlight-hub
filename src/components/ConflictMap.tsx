@@ -8,6 +8,7 @@ interface Props {
   conflicts: Conflict[];
   selectedId: string | null;
   activeTypes?: Set<ConflictType>;
+  incidentCutoff?: number;
   onSelect: (id: string, incidentId?: string) => void;
 }
 
