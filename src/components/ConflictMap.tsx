@@ -237,6 +237,7 @@ export function ConflictMap({ conflicts, selectedId, activeTypes, incidentCutoff
       for (let i = 0; i < c.recent.length; i++) {
         const ev = c.recent[i];
         if (!typeAllowed(ev.type)) continue;
+        if (!withinWindow(ev.timestamp)) continue;
         let lat = ev.lat;
         let lng = ev.lng;
         if (lat == null || lng == null) {
