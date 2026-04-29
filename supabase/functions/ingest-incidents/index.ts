@@ -213,6 +213,7 @@ async function fetchGdeltEvents(): Promise<NormalizedIncident[]> {
       };
       const title = `${TYPE_LABELS[cls.type]} — ${fullName}`;
 
+      const content_hash = await makeContentHash(`${cls.type}:${fullName}`, lat, lng);
       out.push({
         external_id: `gdelt-evt-${eventId}`,
         title: title.slice(0, 200),
@@ -226,6 +227,7 @@ async function fetchGdeltEvents(): Promise<NormalizedIncident[]> {
         source: sourceUrl ? new URL(sourceUrl).hostname.replace(/^www\./, "") : "GDELT",
         source_url: sourceUrl,
         occurred_at: occurred,
+        content_hash,
       });
     }
     return out;
