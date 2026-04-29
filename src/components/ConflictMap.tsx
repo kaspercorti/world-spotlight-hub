@@ -136,9 +136,26 @@ function InvalidateOnResize() {
   return null;
 }
 
+const FANOUT_ZOOM = 8;
+
+function ZoomTracker({ onZoom }: { onZoom: (z: number) => void }) {
+  const map = useMap();
+  useEffect(() => {
+    onZoom(map.getZoom());
+    const handler = () => onZoom(map.getZoom());
+    map.on("zoomend", handler);
+    return () => {
+      map.off("zoomend", handler);
+    };
+  }, [map, onZoom]);
+  return null;
+}
+
 export function ConflictMap({ conflicts, selectedId, activeTypes, onSelect }: Props) {
   const selected = conflicts.find((c) => c.id === selectedId) ?? null;
   const typeAllowed = (t: ConflictType) => !activeTypes || activeTypes.has(t);
+  const [zoom, setZoom] = useState(3);
+  const fannedOut = zoom >= FANOUT_ZOOM;
 
   // Build per-incident markers, then spread overlapping ones in a small pixel-ring
   const incidentMarkers = useMemo(() => {
