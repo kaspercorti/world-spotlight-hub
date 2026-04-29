@@ -39,8 +39,38 @@ interface NormalizedIncident {
 // --- GDELT fetch ---------------------------------------------------------
 // Doc API: https://api.gdeltproject.org/api/v2/doc/doc
 // We use ArtList output with geo info. Query targets violent / civil-unrest events.
+async function fetchOneGdelt(q: string, attempt = 0): Promise<any[]> {
+  const url = `https://api.gdeltproject.org/api/v2/doc/doc?query=${encodeURIComponent(q + ' sourcelang:eng')}&mode=ArtList&format=json&maxrecords=20&sort=DateDesc&timespan=24H`;
+  try {
+    const res = await fetch(url, { headers: { "User-Agent": "lovable-conflict-map/1.0" } });
+    if (res.status === 429 && attempt < 2) {
+      await new Promise((r) => setTimeout(r, 2500 * (attempt + 1)));
+      return fetchOneGdelt(q, attempt + 1);
+    }
+    if (!res.ok) {
+      console.error("GDELT fetch failed", q, res.status);
+      return [];
+    }
+    const text = await res.text();
+    try {
+      const data = JSON.parse(text);
+      return data.articles ?? [];
+    } catch {
+      console.error("GDELT non-JSON for query", q, ":", text.slice(0, 120));
+      return [];
+    }
+  } catch (e) {
+    if (attempt < 2) {
+      await new Promise((r) => setTimeout(r, 1500));
+      return fetchOneGdelt(q, attempt + 1);
+    }
+    console.error("GDELT request error", q, e instanceof Error ? e.message : e);
+    return [];
+  }
+}
+
 async function fetchGdelt(): Promise<any[]> {
-  // Run GDELT queries in parallel to fit within edge function time budget.
+  // Sequential with short delay to avoid GDELT 429s.
   const queries = [
     '(shooting OR bombing OR explosion)',
     '(airstrike OR "air strike" OR missile)',
@@ -48,25 +78,12 @@ async function fetchGdelt(): Promise<any[]> {
     '(kidnapping OR hostage OR abduction)',
     '(arson OR "set on fire")',
   ];
-  const results = await Promise.all(queries.map(async (q) => {
-    const url = `https://api.gdeltproject.org/api/v2/doc/doc?query=${encodeURIComponent(q + ' sourcelang:eng')}&mode=ArtList&format=json&maxrecords=20&sort=DateDesc&timespan=24H`;
-    try {
-      const res = await fetch(url, { headers: { "User-Agent": "lovable-conflict-map/1.0" } });
-      if (!res.ok) { console.error("GDELT fetch failed", q, res.status); return []; }
-      const text = await res.text();
-      try {
-        const data = JSON.parse(text);
-        return data.articles ?? [];
-      } catch {
-        console.error("GDELT non-JSON for query", q, ":", text.slice(0, 120));
-        return [];
-      }
-    } catch (e) {
-      console.error("GDELT request error", q, e);
-      return [];
-    }
-  }));
-  const all = results.flat();
+  const all: any[] = [];
+  for (const q of queries) {
+    const articles = await fetchOneGdelt(q);
+    all.push(...articles);
+    await new Promise((r) => setTimeout(r, 800));
+  }
   const seen = new Set<string>();
   return all.filter((a) => {
     if (!a.url || seen.has(a.url)) return false;
