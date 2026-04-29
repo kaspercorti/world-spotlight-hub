@@ -261,7 +261,7 @@ export function ConflictMap({ conflicts, selectedId, activeTypes, incidentCutoff
     }
     return items;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [conflicts, activeTypes]);
+  }, [conflicts, activeTypes, incidentCutoff]);
 
   return (
     <div className="absolute inset-0 bg-background">
