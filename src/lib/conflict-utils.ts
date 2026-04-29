@@ -19,6 +19,12 @@ export const typeMeta: Record<ConflictType, { label: string; icon: string }> = {
   terror: { label: "Terror attack", icon: "✦" },
   civil: { label: "Civil incident", icon: "▲" },
   cyber: { label: "Cyberattack", icon: "◈" },
+  explosion: { label: "Explosion", icon: "✸" },
+  shooting: { label: "Shooting", icon: "⊙" },
+  robbery: { label: "Robbery", icon: "$" },
+  arson: { label: "Arson", icon: "🔥" },
+  kidnapping: { label: "Kidnapping", icon: "⚑" },
+  airstrike: { label: "Airstrike", icon: "✈" },
 };
 
 export function timeAgo(iso: string): string {
