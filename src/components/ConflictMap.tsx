@@ -7,6 +7,7 @@ import { severityMeta } from "@/lib/conflict-utils";
 interface Props {
   conflicts: Conflict[];
   selectedId: string | null;
+  activeTypes?: Set<ConflictType>;
   onSelect: (id: string, incidentId?: string) => void;
 }
 
