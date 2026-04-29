@@ -8,7 +8,7 @@ import { Legend } from "@/components/Legend";
 import { conflicts as ALL, type ConflictType, type Severity } from "@/data/conflicts";
 import { severityMeta } from "@/lib/conflict-utils";
 
-const ALL_TYPES: ConflictType[] = ["war", "protest", "terror", "civil", "cyber"];
+const ALL_TYPES: ConflictType[] = ["war", "airstrike", "explosion", "shooting", "terror", "protest", "civil", "robbery", "kidnapping", "arson", "cyber"];
 
 const Index = () => {
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -28,7 +28,9 @@ const Index = () => {
       return Date.now() - days * 86400 * 1000;
     })();
     return ALL.filter((c) => {
-      if (!types.has(c.type)) return false;
+      // Match if conflict type OR any incident type is selected
+      const typeMatch = types.has(c.type) || c.recent.some((r) => types.has(r.type));
+      if (!typeMatch) return false;
       if (severityMeta[c.severity].rank < severityMeta[minSeverity].rank) return false;
       const recentEnough = c.recent.some((r) => +new Date(r.timestamp) >= cutoff) || +new Date(c.startedAt) >= cutoff || timeRange === "all" || c.incidents24h > 0;
       return recentEnough;
@@ -48,7 +50,7 @@ const Index = () => {
 
   return (
     <main className="relative h-screen w-screen overflow-hidden bg-background">
-      <ConflictMap conflicts={filtered} selectedId={selectedId} onSelect={handleSelect} />
+      <ConflictMap conflicts={filtered} activeTypes={types} selectedId={selectedId} onSelect={handleSelect} />
 
       <TopBar activeCount={activeCount} totalIncidents={totalIncidents} />
       <Legend />
