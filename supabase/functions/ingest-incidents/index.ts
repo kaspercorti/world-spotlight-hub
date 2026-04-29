@@ -51,18 +51,25 @@ async function fetchGdelt(): Promise<any[]> {
   const all: any[] = [];
   for (const q of queries) {
     const url = `https://api.gdeltproject.org/api/v2/doc/doc?query=${encodeURIComponent(q + ' sourcelang:eng')}&mode=ArtList&format=json&maxrecords=25&sort=DateDesc&timespan=24H`;
-    const res = await fetch(url, { headers: { "User-Agent": "lovable-conflict-map/1.0" } });
-    if (!res.ok) {
-      console.error("GDELT fetch failed", q, res.status);
-      continue;
-    }
-    const text = await res.text();
     try {
-      const data = JSON.parse(text);
-      if (data.articles) all.push(...data.articles);
-    } catch {
-      console.error("GDELT non-JSON for query", q, ":", text.slice(0, 120));
+      const res = await fetch(url, { headers: { "User-Agent": "lovable-conflict-map/1.0" } });
+      if (!res.ok) {
+        console.error("GDELT fetch failed", q, res.status);
+        await new Promise((r) => setTimeout(r, 2000));
+        continue;
+      }
+      const text = await res.text();
+      try {
+        const data = JSON.parse(text);
+        if (data.articles) all.push(...data.articles);
+      } catch {
+        console.error("GDELT non-JSON for query", q, ":", text.slice(0, 120));
+      }
+    } catch (e) {
+      console.error("GDELT request error", q, e);
     }
+    // Throttle to avoid 429
+    await new Promise((r) => setTimeout(r, 1500));
   }
   // Dedup by url
   const seen = new Set<string>();
