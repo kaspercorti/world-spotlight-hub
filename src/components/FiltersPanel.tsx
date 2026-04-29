@@ -4,7 +4,7 @@ import type { ConflictType, Severity } from "@/data/conflicts";
 import { typeMeta, severityMeta } from "@/lib/conflict-utils";
 import { cn } from "@/lib/utils";
 
-export type TimeRange = "24h" | "7d" | "30d" | "all";
+export type TimeRange = "24h" | "48h";
 
 interface Props {
   types: Set<ConflictType>;
@@ -17,9 +17,7 @@ interface Props {
 
 const TIME: { key: TimeRange; label: string }[] = [
   { key: "24h", label: "24h" },
-  { key: "7d", label: "7d" },
-  { key: "30d", label: "30d" },
-  { key: "all", label: "All" },
+  { key: "48h", label: "48h" },
 ];
 
 const SEV: Severity[] = ["low", "tension", "active", "war"];

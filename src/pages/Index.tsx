@@ -15,7 +15,7 @@ const Index = () => {
   const [selectedIncidentId, setSelectedIncidentId] = useState<string | null>(null);
   const [types, setTypes] = useState<Set<ConflictType>>(new Set(ALL_TYPES));
   const [minSeverity, setMinSeverity] = useState<Severity>("low");
-  const [timeRange, setTimeRange] = useState<TimeRange>("7d");
+  const [timeRange, setTimeRange] = useState<TimeRange>("24h");
 
   const handleSelect = (id: string, incidentId?: string) => {
     setSelectedId(id);
@@ -23,9 +23,8 @@ const Index = () => {
   };
 
   const cutoff = useMemo(() => {
-    if (timeRange === "all") return 0;
-    const days = timeRange === "24h" ? 1 : timeRange === "7d" ? 7 : 30;
-    return Date.now() - days * 86400 * 1000;
+    const hours = timeRange === "24h" ? 24 : 48;
+    return Date.now() - hours * 3600 * 1000;
   }, [timeRange]);
 
   const filtered = useMemo(() => {
@@ -34,13 +33,12 @@ const Index = () => {
       const typeMatch = types.has(c.type) || c.recent.some((r) => types.has(r.type));
       if (!typeMatch) return false;
       if (severityMeta[c.severity].rank < severityMeta[minSeverity].rank) return false;
-      if (timeRange === "all") return true;
       // Strict: must have an incident within the window, or have started within it
       const hasRecent = c.recent.some((r) => +new Date(r.timestamp) >= cutoff);
       const startedInWindow = +new Date(c.startedAt) >= cutoff;
       return hasRecent || startedInWindow;
     });
-  }, [types, minSeverity, timeRange, cutoff]);
+  }, [types, minSeverity, cutoff]);
 
   const selected = filtered.find((c) => c.id === selectedId) ?? ALL.find((c) => c.id === selectedId) ?? null;
   const totalIncidents = filtered.reduce((s, c) => s + c.incidents24h, 0);
