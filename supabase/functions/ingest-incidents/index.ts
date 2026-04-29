@@ -107,42 +107,31 @@ function parseSeenDate(s: string): string | null {
 // Each row is the latest 15-min export of CAMEO events with lat/lng.
 // =====================================================================
 
-// CAMEO root codes -> our taxonomy. We only keep violent / unrest events.
+// Strict CAMEO -> our taxonomy. Only specific violent sub-codes, not entire roots, to filter noise.
 function cameoToType(eventCode: string): { type: IncidentType; severity: Severity } | null {
   if (!eventCode) return null;
-  const root = eventCode.slice(0, 2);
-  // 14 = Protest, 15 = Exhibit force, 17 = Coerce,
-  // 18 = Assault, 19 = Fight, 20 = Use unconventional mass violence
-  if (root === "14") return { type: "protest", severity: "tension" };
-  if (root === "15") return { type: "civil", severity: "tension" };
-  if (root === "17") {
-    if (eventCode.startsWith("173")) return { type: "kidnapping", severity: "active" };
-    return { type: "civil", severity: "tension" };
-  }
-  if (root === "18") {
-    // 1821 = abduction, 183 = bombings, 1831 suicide bomb
-    if (eventCode.startsWith("181")) return { type: "shooting", severity: "active" };
-    if (eventCode.startsWith("182")) return { type: "shooting", severity: "active" };
-    if (eventCode.startsWith("183")) return { type: "explosion", severity: "active" };
-    if (eventCode.startsWith("184")) return { type: "shooting", severity: "active" };
-    if (eventCode.startsWith("185")) return { type: "airstrike", severity: "war" };
-    if (eventCode.startsWith("186")) return { type: "kidnapping", severity: "active" };
-    return { type: "shooting", severity: "active" };
-  }
-  if (root === "19") {
-    if (eventCode.startsWith("193")) return { type: "war", severity: "war" };
-    if (eventCode.startsWith("195")) return { type: "war", severity: "war" };
-    if (eventCode.startsWith("196")) return { type: "war", severity: "war" };
-    if (eventCode === "190" || eventCode === "1900") return { type: "war", severity: "war" };
-    return { type: "war", severity: "active" };
-  }
-  if (root === "20") {
-    if (eventCode.startsWith("201")) return { type: "terror", severity: "war" };
-    if (eventCode.startsWith("202")) return { type: "terror", severity: "war" };
-    if (eventCode.startsWith("203")) return { type: "terror", severity: "war" };
-    if (eventCode.startsWith("204")) return { type: "terror", severity: "war" };
-    return { type: "terror", severity: "war" };
-  }
+  const c = eventCode;
+  // 145* = riot / violent demonstration
+  if (c.startsWith("145")) return { type: "protest", severity: "active" };
+  // 173* = arrest / detain (often violent context)
+  if (c.startsWith("173")) return { type: "kidnapping", severity: "active" };
+  // 175 = use tactics of violent repression
+  if (c === "175" || c.startsWith("175")) return { type: "shooting", severity: "active" };
+  // 18* ASSAULT (physical)
+  if (c === "180" || c === "181" || c.startsWith("181")) return { type: "shooting", severity: "active" };
+  if (c === "182" || c.startsWith("182")) return { type: "kidnapping", severity: "active" };
+  if (c === "183" || c.startsWith("183")) return { type: "explosion", severity: "active" };
+  if (c === "184" || c.startsWith("184")) return { type: "shooting", severity: "active" };
+  if (c === "185" || c.startsWith("185")) return { type: "airstrike", severity: "war" };
+  if (c === "186" || c.startsWith("186")) return { type: "kidnapping", severity: "active" };
+  // 19* FIGHT — only actual combat sub-codes (skip 190/191/192 which are threats)
+  if (c === "193" || c.startsWith("193")) return { type: "shooting", severity: "active" };
+  if (c === "194" || c.startsWith("194")) return { type: "explosion", severity: "active" };
+  if (c === "195" || c.startsWith("195")) return { type: "war", severity: "war" };
+  if (c === "196" || c.startsWith("196")) return { type: "war", severity: "war" };
+  // 20* MASS VIOLENCE
+  if (c.startsWith("201") || c.startsWith("202") || c.startsWith("203")) return { type: "terror", severity: "war" };
+  if (c.startsWith("204")) return { type: "war", severity: "war" };
   return null;
 }
 
