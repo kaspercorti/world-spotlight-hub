@@ -433,9 +433,16 @@ async function processDocApi(supabase: any): Promise<number> {
   }
 
   if (rows.length === 0) return 0;
-  const { error } = await supabase.from("incidents").upsert(rows, { onConflict: "content_hash", ignoreDuplicates: true });
+  // Dedup within batch on content_hash
+  const seen = new Set<string>();
+  const uniqueRows = rows.filter((r) => {
+    if (seen.has(r.content_hash)) return false;
+    seen.add(r.content_hash);
+    return true;
+  });
+  const { error } = await supabase.from("incidents").upsert(uniqueRows, { onConflict: "content_hash", ignoreDuplicates: true });
   if (error) { console.error("Doc insert failed:", error); return 0; }
-  return rows.length;
+  return uniqueRows.length;
 }
 
 async function processEvents(supabase: any): Promise<number> {
