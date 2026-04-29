@@ -3,8 +3,20 @@ import type { Conflict } from "@/data/conflicts";
 import { severityMeta, verificationMeta, typeMeta, timeAgo } from "@/lib/conflict-utils";
 import { cn } from "@/lib/utils";
 
-export function ConflictDetail({ conflict, onClose }: { conflict: Conflict; onClose: () => void }) {
+export function ConflictDetail({
+  conflict,
+  highlightIncidentId,
+  onClose,
+}: {
+  conflict: Conflict;
+  highlightIncidentId?: string | null;
+  onClose: () => void;
+}) {
   const sev = severityMeta[conflict.severity];
+  const focused = highlightIncidentId
+    ? conflict.recent.find((r) => r.id === highlightIncidentId) ?? null
+    : null;
+  const others = focused ? conflict.recent.filter((r) => r.id !== focused.id) : conflict.recent;
 
   return (
     <aside className="pointer-events-auto absolute right-0 top-0 z-[1001] flex h-full w-full max-w-md flex-col border-l border-border bg-gradient-panel backdrop-blur-xl shadow-panel animate-slide-in-right">
