@@ -122,9 +122,9 @@ export function ConflictMap({ conflicts, selectedId, activeTypes, onSelect }: Pr
   const selected = conflicts.find((c) => c.id === selectedId) ?? null;
   const typeAllowed = (t: ConflictType) => !activeTypes || activeTypes.has(t);
 
-  // Build per-incident markers (deterministic small offset for those without explicit coords)
+  // Build per-incident markers, then spread overlapping ones in a small pixel-ring
   const incidentMarkers = useMemo(() => {
-    const items: { key: string; incidentId: string; lat: number; lng: number; type: ConflictType; severity: Severity; conflictId: string; title: string }[] = [];
+    const items: { key: string; incidentId: string; lat: number; lng: number; type: ConflictType; severity: Severity; conflictId: string; title: string; offsetX: number; offsetY: number }[] = [];
     for (const c of conflicts) {
       for (let i = 0; i < c.recent.length; i++) {
         const ev = c.recent[i];
@@ -145,8 +145,28 @@ export function ConflictMap({ conflicts, selectedId, activeTypes, onSelect }: Pr
           severity: c.severity,
           conflictId: c.id,
           title: `${ev.title} — ${typeLabel[ev.type]}`,
+          offsetX: 0,
+          offsetY: 0,
         });
       }
+    }
+
+    // Group by rounded coordinate (~1km bucket) and fan out members in a ring of pixel offsets
+    const buckets = new Map<string, typeof items>();
+    for (const it of items) {
+      const key = `${it.lat.toFixed(2)}_${it.lng.toFixed(2)}`;
+      const arr = buckets.get(key) ?? [];
+      arr.push(it);
+      buckets.set(key, arr);
+    }
+    for (const group of buckets.values()) {
+      if (group.length <= 1) continue;
+      const radius = 18 + group.length * 2; // px
+      group.forEach((it, idx) => {
+        const a = (idx / group.length) * Math.PI * 2 - Math.PI / 2;
+        it.offsetX = Math.cos(a) * radius;
+        it.offsetY = Math.sin(a) * radius;
+      });
     }
     return items;
   }, [conflicts]);
