@@ -16,6 +16,7 @@ export type Database = {
     Tables: {
       incidents: {
         Row: {
+          content_hash: string | null
           country: string | null
           created_at: string
           external_id: string
@@ -32,6 +33,7 @@ export type Database = {
           type: string
         }
         Insert: {
+          content_hash?: string | null
           country?: string | null
           created_at?: string
           external_id: string
@@ -48,6 +50,7 @@ export type Database = {
           type: string
         }
         Update: {
+          content_hash?: string | null
           country?: string | null
           created_at?: string
           external_id?: string
