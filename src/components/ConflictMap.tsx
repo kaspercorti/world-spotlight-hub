@@ -95,21 +95,23 @@ export function ConflictMap({ conflicts, selectedId, onSelect }: Props) {
   const selected = conflicts.find((c) => c.id === selectedId) ?? null;
 
   return (
-    <div className="absolute inset-0">
+    <div className="absolute inset-0 bg-background">
       <MapContainer
-        center={[20, 10]}
+        center={[25, 15]}
         zoom={3}
         minZoom={2}
-        maxZoom={10}
+        maxZoom={18}
         worldCopyJump
         zoomControl={true}
         attributionControl={true}
         className="h-full w-full"
+        style={{ background: "hsl(220 25% 6%)" }}
       >
-        {/* OpenStreetMap — no API key required, reliable */}
+        {/* CARTO dark basemap — free, no API key, matches command-center theme */}
         <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-          url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/attributions">CARTO</a>'
+          url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+          subdomains={["a", "b", "c", "d"]}
           maxZoom={19}
         />
         {conflicts.map((c) => (
