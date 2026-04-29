@@ -15,7 +15,7 @@ const Index = () => {
   const [selectedIncidentId, setSelectedIncidentId] = useState<string | null>(null);
   const [types, setTypes] = useState<Set<ConflictType>>(new Set(ALL_TYPES));
   const [minSeverity, setMinSeverity] = useState<Severity>("low");
-  const [timeRange, setTimeRange] = useState<TimeRange>("7d");
+  const [timeRange, setTimeRange] = useState<TimeRange>("24h");
 
   const handleSelect = (id: string, incidentId?: string) => {
     setSelectedId(id);
