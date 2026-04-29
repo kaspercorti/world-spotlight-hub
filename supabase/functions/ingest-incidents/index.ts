@@ -364,8 +364,18 @@ async function processDocApi(supabase: any): Promise<number> {
   console.log(`GDELT Doc returned ${articles.length} articles`);
   if (articles.length === 0) return 0;
 
-  const candidates = articles.slice(0, 80).map((a: any, i: number) => ({
-    id: `gdelt-${a.url ? btoa(a.url).slice(0, 24) : i}`,
+  // Collapse syndicated copies of the same article (same GDELT article ID across many local sites).
+  const byArticleKey = new Map<string, any>();
+  for (const a of articles) {
+    if (!a.url) continue;
+    const key = gdeltArticleKey(a.url);
+    if (!byArticleKey.has(key)) byArticleKey.set(key, a);
+  }
+  const unique = Array.from(byArticleKey.values());
+  console.log(`Doc unique articles after syndication-dedup: ${unique.length}`);
+
+  const candidates = unique.slice(0, 80).map((a: any, i: number) => ({
+    id: `gdelt-${gdeltArticleKey(a.url) || btoa(a.url).slice(0, 24) || i}`,
     title: (a.title ?? "").slice(0, 240),
     snippet: (a.title ?? "").slice(0, 240),
     country: a.sourcecountry,
@@ -401,20 +411,24 @@ async function processDocApi(supabase: any): Promise<number> {
     const centroid = COUNTRY_CENTROIDS[eventCountry];
     if (!centroid) continue;
     const jitter = () => (Math.random() - 0.5) * 1.5;
+    const lat = centroid[0] + jitter();
+    const lng = centroid[1] + jitter();
     const occurred = parseSeenDate(c.seendate) ?? new Date().toISOString();
+    const content_hash = await makeContentHash(c.title, lat, lng);
     rows.push({
       external_id: c.id,
       title: c.title || "Untitled incident",
       summary: cls.short_summary ?? "",
       type: cls.type,
       severity: cls.severity ?? "tension",
-      lat: centroid[0] + jitter(),
-      lng: centroid[1] + jitter(),
+      lat,
+      lng,
       location: cls.location ?? eventCountry,
       country: eventCountry,
       source: c.domain ?? "GDELT",
       source_url: c.url ?? null,
       occurred_at: occurred,
+      content_hash,
     });
   }
 
