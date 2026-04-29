@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { MapContainer, TileLayer, Marker, useMap } from "react-leaflet";
 import L from "leaflet";
 import type { Conflict, ConflictType, Severity } from "@/data/conflicts";
@@ -54,7 +54,7 @@ const typeLabel: Record<ConflictType, string> = {
 function makeIcon(
   type: ConflictType,
   severity: Severity,
-  opts?: { small?: boolean; offsetX?: number; offsetY?: number }
+  opts?: { small?: boolean; offsetX?: number; offsetY?: number; extraCount?: number }
 ) {
   const color = severityMeta[severity].color;
   const intense = severity === "war" || severity === "active";
@@ -63,6 +63,17 @@ function makeIcon(
   const size = base;
   const ox = opts?.offsetX ?? 0;
   const oy = opts?.offsetY ?? 0;
+  const extra = opts?.extraCount ?? 0;
+
+  const badge = extra > 0 ? `
+    <div style="
+      position:absolute; top:-6px; right:-6px;
+      min-width:18px; height:18px; padding:0 5px;
+      background:hsl(0 0% 100%); color:hsl(220 25% 8%);
+      border-radius:9px; font:600 10px/18px ui-sans-serif,system-ui,sans-serif;
+      text-align:center; box-shadow:0 0 0 2px rgba(0,0,0,0.6), 0 0 8px ${color};
+      pointer-events:none;
+    ">+${extra}</div>` : "";
 
   const html = `
     <div class="conflict-marker" style="width:${size}px;height:${size}px;position:relative;">
@@ -79,15 +90,22 @@ function makeIcon(
           ${glyph}
         </svg>
       </div>
+      ${badge}
     </div>`;
   return L.divIcon({
     html,
     className: "",
     iconSize: [size, size],
-    // iconAnchor controls where the marker "points" — shift it to spread overlapping markers
     iconAnchor: [size / 2 - ox, size / 2 - oy],
   });
 }
+
+// Priority for picking which incident represents a cluster (higher = worse)
+const SEV_RANK: Record<Severity, number> = { low: 1, tension: 2, active: 3, war: 4 };
+const TYPE_RANK: Record<ConflictType, number> = {
+  war: 10, airstrike: 9, explosion: 8, terror: 7, shooting: 6,
+  kidnapping: 5, arson: 4, robbery: 3, civil: 2, protest: 1, cyber: 1,
+};
 
 function FlyTo({ conflict }: { conflict: Conflict | null }) {
   const map = useMap();
@@ -118,9 +136,26 @@ function InvalidateOnResize() {
   return null;
 }
 
+const FANOUT_ZOOM = 8;
+
+function ZoomTracker({ onZoom }: { onZoom: (z: number) => void }) {
+  const map = useMap();
+  useEffect(() => {
+    onZoom(map.getZoom());
+    const handler = () => onZoom(map.getZoom());
+    map.on("zoomend", handler);
+    return () => {
+      map.off("zoomend", handler);
+    };
+  }, [map, onZoom]);
+  return null;
+}
+
 export function ConflictMap({ conflicts, selectedId, activeTypes, onSelect }: Props) {
   const selected = conflicts.find((c) => c.id === selectedId) ?? null;
   const typeAllowed = (t: ConflictType) => !activeTypes || activeTypes.has(t);
+  const [zoom, setZoom] = useState(3);
+  const fannedOut = zoom >= FANOUT_ZOOM;
 
   // Build per-incident markers, then spread overlapping ones in a small pixel-ring
   const incidentMarkers = useMemo(() => {
@@ -200,18 +235,61 @@ export function ConflictMap({ conflicts, selectedId, activeTypes, onSelect }: Pr
             eventHandlers={{ click: () => onSelect(c.id) }}
           />
         ))}
-        {/* Per-incident markers — only those matching selected types */}
-        {incidentMarkers.filter((m) => typeAllowed(m.type)).map((m) => (
-          <Marker
-            key={m.key}
-            position={[m.lat, m.lng]}
-            icon={makeIcon(m.type, m.severity, { small: true, offsetX: m.offsetX, offsetY: m.offsetY })}
-            title={m.title}
-            eventHandlers={{ click: () => onSelect(m.conflictId, m.incidentId) }}
-          />
-        ))}
+        {/* Per-incident markers — clustered when zoomed out (worst icon + N badge), fanned out when zoomed in */}
+        {(() => {
+          const visible = incidentMarkers.filter((m) => typeAllowed(m.type));
+          // Group by location
+          const groups = new Map<string, typeof visible>();
+          for (const m of visible) {
+            const k = `${m.lat.toFixed(2)}_${m.lng.toFixed(2)}`;
+            const arr = groups.get(k) ?? [];
+            arr.push(m);
+            groups.set(k, arr);
+          }
+          const out: JSX.Element[] = [];
+          for (const group of groups.values()) {
+            if (group.length === 1 || fannedOut) {
+              for (const m of group) {
+                out.push(
+                  <Marker
+                    key={m.key}
+                    position={[m.lat, m.lng]}
+                    icon={makeIcon(m.type, m.severity, {
+                      small: true,
+                      offsetX: fannedOut ? m.offsetX : 0,
+                      offsetY: fannedOut ? m.offsetY : 0,
+                    })}
+                    title={m.title}
+                    eventHandlers={{ click: () => onSelect(m.conflictId, m.incidentId) }}
+                  />
+                );
+              }
+            } else {
+              // Pick the "worst" incident in the group
+              const worst = [...group].sort((a, b) => {
+                const s = SEV_RANK[b.severity] - SEV_RANK[a.severity];
+                if (s !== 0) return s;
+                return TYPE_RANK[b.type] - TYPE_RANK[a.type];
+              })[0];
+              out.push(
+                <Marker
+                  key={`cluster-${worst.key}`}
+                  position={[worst.lat, worst.lng]}
+                  icon={makeIcon(worst.type, worst.severity, {
+                    small: true,
+                    extraCount: group.length - 1,
+                  })}
+                  title={`${worst.title} (+${group.length - 1} more — zoom in)`}
+                  eventHandlers={{ click: () => onSelect(worst.conflictId, worst.incidentId) }}
+                />
+              );
+            }
+          }
+          return out;
+        })()}
         <FlyTo conflict={selected} />
         <InvalidateOnResize />
+        <ZoomTracker onZoom={setZoom} />
       </MapContainer>
       <div className="pointer-events-none absolute inset-0 bg-gradient-radar" />
     </div>
