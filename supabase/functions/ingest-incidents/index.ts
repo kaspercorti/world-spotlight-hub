@@ -443,15 +443,22 @@ async function processEvents(supabase: any): Promise<number> {
   console.log(`GDELT Events parsed: ${events.length}`);
   if (events.length === 0) return 0;
 
-  // Dedup against DB
-  const ids = events.map((e) => e.external_id);
-  const { data: existing } = await supabase.from("incidents").select("external_id").in("external_id", ids);
-  const existingSet = new Set((existing ?? []).map((r: any) => r.external_id));
-  const fresh = events.filter((e) => !existingSet.has(e.external_id));
-  console.log(`Events fresh after dedup: ${fresh.length}`);
+  // Dedup within the batch on content_hash first.
+  const seenHash = new Set<string>();
+  const inBatchUnique = events.filter((e) => {
+    if (seenHash.has(e.content_hash)) return false;
+    seenHash.add(e.content_hash);
+    return true;
+  });
+  console.log(`Events unique in batch: ${inBatchUnique.length}`);
+
+  const hashes = inBatchUnique.map((e) => e.content_hash);
+  const { data: existing } = await supabase.from("incidents").select("content_hash").in("content_hash", hashes);
+  const existingSet = new Set((existing ?? []).map((r: any) => r.content_hash));
+  const fresh = inBatchUnique.filter((e) => !existingSet.has(e.content_hash));
+  console.log(`Events fresh after DB dedup: ${fresh.length}`);
   if (fresh.length === 0) return 0;
 
-  // Insert in batches of 200 to be safe
   let inserted = 0;
   for (let i = 0; i < fresh.length; i += 200) {
     const batch = fresh.slice(i, i + 200);
