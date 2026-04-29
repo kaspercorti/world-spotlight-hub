@@ -141,7 +141,7 @@ function SpreadMarkers({
 
   const positioned = useMemo(() => {
     // Pixel threshold for "same place" — bigger when zoomed out
-    const threshold = 38;
+    const threshold = 26;
     type P = RawMarker & { px: number; py: number };
     const pts: P[] = markers.map((m) => {
       const p = map.project([m.lat, m.lng], zoom);
