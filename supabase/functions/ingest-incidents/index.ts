@@ -1,4 +1,4 @@
-// Ingests real-world incidents from GDELT and classifies them via Lovable AI.
+// Ingests real-world incidents from GDELT (Doc API + Events 2.0) and classifies via Lovable AI.
 // Public function (no JWT). Triggered by cron every 5 minutes.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
@@ -36,9 +36,9 @@ interface NormalizedIncident {
   occurred_at: string;
 }
 
-// --- GDELT fetch ---------------------------------------------------------
-// Doc API: https://api.gdeltproject.org/api/v2/doc/doc
-// We use ArtList output with geo info. Query targets violent / civil-unrest events.
+// =====================================================================
+// GDELT Doc API (article search)
+// =====================================================================
 async function fetchOneGdelt(q: string, attempt = 0): Promise<any[]> {
   const url = `https://api.gdeltproject.org/api/v2/doc/doc?query=${encodeURIComponent(q + ' sourcelang:eng')}&mode=ArtList&format=json&maxrecords=20&sort=DateDesc&timespan=24H`;
   try {
@@ -47,10 +47,7 @@ async function fetchOneGdelt(q: string, attempt = 0): Promise<any[]> {
       await new Promise((r) => setTimeout(r, 2500 * (attempt + 1)));
       return fetchOneGdelt(q, attempt + 1);
     }
-    if (!res.ok) {
-      console.error("GDELT fetch failed", q, res.status);
-      return [];
-    }
+    if (!res.ok) { console.error("GDELT doc fetch failed", q, res.status); return []; }
     const text = await res.text();
     try {
       const data = JSON.parse(text);
@@ -69,20 +66,26 @@ async function fetchOneGdelt(q: string, attempt = 0): Promise<any[]> {
   }
 }
 
-async function fetchGdelt(): Promise<any[]> {
-  // Sequential with short delay to avoid GDELT 429s.
+async function fetchGdeltDoc(): Promise<any[]> {
+  // Broader violence/unrest keyword coverage.
   const queries = [
-    '(shooting OR bombing OR explosion)',
-    '(airstrike OR "air strike" OR missile)',
-    '(protest OR riot OR unrest)',
-    '(kidnapping OR hostage OR abduction)',
-    '(arson OR "set on fire")',
+    '(shooting OR "shot dead" OR "opened fire")',
+    '(bombing OR explosion OR blast OR detonation)',
+    '(airstrike OR "air strike" OR missile OR drone strike)',
+    '(protest OR riot OR "civil unrest" OR demonstration)',
+    '(kidnapping OR hostage OR abduction OR abducted)',
+    '(arson OR "set on fire" OR torched)',
+    '(attack OR raid OR ambush OR clash OR siege)',
+    '(stabbing OR "knife attack" OR "knife crime")',
+    '(terror OR terrorist OR militant OR insurgent)',
+    '("gang violence" OR cartel OR "drive-by")',
+    '(hijacking OR sabotage OR cyberattack OR ransomware)',
   ];
   const all: any[] = [];
   for (const q of queries) {
     const articles = await fetchOneGdelt(q);
     all.push(...articles);
-    await new Promise((r) => setTimeout(r, 800));
+    await new Promise((r) => setTimeout(r, 600));
   }
   const seen = new Set<string>();
   return all.filter((a) => {
@@ -92,18 +95,158 @@ async function fetchGdelt(): Promise<any[]> {
   });
 }
 
-
-// Parse GDELT seendate ("YYYYMMDDTHHMMSSZ") to ISO
 function parseSeenDate(s: string): string | null {
   const m = s?.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/);
   if (!m) return null;
   return `${m[1]}-${m[2]}-${m[3]}T${m[4]}:${m[5]}:${m[6]}Z`;
 }
 
-// --- AI classification ---------------------------------------------------
+// =====================================================================
+// GDELT Events 2.0 (geo-exact, CAMEO-coded)
+// http://data.gdeltproject.org/gdeltv2/lastupdate.txt
+// Each row is the latest 15-min export of CAMEO events with lat/lng.
+// =====================================================================
+
+// Strict CAMEO -> our taxonomy. Only specific violent sub-codes, not entire roots, to filter noise.
+function cameoToType(eventCode: string): { type: IncidentType; severity: Severity } | null {
+  if (!eventCode) return null;
+  const c = eventCode;
+  // 145* = riot / violent demonstration
+  if (c.startsWith("145")) return { type: "protest", severity: "active" };
+  // NOTE: 173* (arrest/detain) deliberately EXCLUDED — too noisy (every drink-driving arrest matched).
+  // 175 = use tactics of violent repression
+  if (c.startsWith("175")) return { type: "shooting", severity: "active" };
+  // 18* ASSAULT (physical)
+  if (c === "180" || c === "181" || c.startsWith("181")) return { type: "shooting", severity: "active" };
+  if (c === "182" || c.startsWith("182")) return { type: "kidnapping", severity: "active" };
+  if (c === "183" || c.startsWith("183")) return { type: "explosion", severity: "active" };
+  if (c === "184" || c.startsWith("184")) return { type: "shooting", severity: "active" };
+  if (c === "185" || c.startsWith("185")) return { type: "airstrike", severity: "war" };
+  if (c === "186" || c.startsWith("186")) return { type: "kidnapping", severity: "active" };
+  // 19* FIGHT — only actual combat sub-codes (skip 190/191/192 which are threats)
+  if (c === "193" || c.startsWith("193")) return { type: "shooting", severity: "active" };
+  if (c === "194" || c.startsWith("194")) return { type: "explosion", severity: "active" };
+  if (c === "195" || c.startsWith("195")) return { type: "war", severity: "war" };
+  if (c === "196" || c.startsWith("196")) return { type: "war", severity: "war" };
+  // 20* MASS VIOLENCE
+  if (c.startsWith("201") || c.startsWith("202") || c.startsWith("203")) return { type: "terror", severity: "war" };
+  if (c.startsWith("204")) return { type: "war", severity: "war" };
+  return null;
+}
+
+async function fetchGdeltEvents(): Promise<NormalizedIncident[]> {
+  try {
+    // Get the latest export filename
+    const lu = await fetch("http://data.gdeltproject.org/gdeltv2/lastupdate.txt");
+    if (!lu.ok) { console.error("Events lastupdate failed", lu.status); return []; }
+    const luText = await lu.text();
+    // First line points to the export.CSV.zip; we want the .export.CSV.zip URL
+    const exportLine = luText.split("\n").find((l) => l.includes(".export.CSV.zip"));
+    if (!exportLine) { console.error("No export line in lastupdate"); return []; }
+    const url = exportLine.trim().split(/\s+/).pop();
+    if (!url) return [];
+
+    // Use Deno's gunzip via DecompressionStream — but the file is .zip not .gz.
+    // We instead fetch the .CSV (uncompressed) endpoint by transforming URL? GDELT
+    // only serves zipped exports. We use a proxy-free approach: fetch zip and unzip.
+    const zipRes = await fetch(url);
+    if (!zipRes.ok) { console.error("Events zip fetch failed", zipRes.status); return []; }
+    const zipBuf = new Uint8Array(await zipRes.arrayBuffer());
+
+    // Minimal ZIP reader: locate first file, inflate raw deflate stream.
+    const csv = await unzipFirstFile(zipBuf);
+    if (!csv) { console.error("Failed to unzip GDELT events"); return []; }
+
+    // GDELT Events 2.0 column indexes (0-based) — we need a few:
+    // 0 GLOBALEVENTID, 1 SQLDATE, 26 EventCode, 31 NumMentions, 33 GoldsteinScale,
+    // 51 ActionGeo_Type, 52 ActionGeo_FullName, 53 ActionGeo_CountryCode,
+    // 56 ActionGeo_Lat, 57 ActionGeo_Long, 60 SOURCEURL, 59 DATEADDED
+    const lines = csv.split("\n");
+    const out: NormalizedIncident[] = [];
+    for (const line of lines) {
+      if (!line) continue;
+      const cols = line.split("\t");
+      if (cols.length < 61) continue;
+      const eventId = cols[0];
+      const eventCode = cols[26];
+      const cls = cameoToType(eventCode);
+      if (!cls) continue;
+      const lat = parseFloat(cols[56]);
+      const lng = parseFloat(cols[57]);
+      if (!isFinite(lat) || !isFinite(lng) || (lat === 0 && lng === 0)) continue;
+      const fullName = cols[52] || cols[53] || "Unknown location";
+      const sourceUrl = cols[60] || null;
+      const dateAdded = cols[59]; // YYYYMMDDHHMMSS
+      let occurred = new Date().toISOString();
+      if (/^\d{14}$/.test(dateAdded)) {
+        const d = dateAdded;
+        occurred = `${d.slice(0,4)}-${d.slice(4,6)}-${d.slice(6,8)}T${d.slice(8,10)}:${d.slice(10,12)}:${d.slice(12,14)}Z`;
+      }
+      const country = cols[53] || null; // FIPS country code
+
+      // Title: human-readable label per type + location. URL slugs were misleading
+      // (one article triggers many CAMEO events with different types).
+      const TYPE_LABELS: Record<IncidentType, string> = {
+        war: "Armed conflict", airstrike: "Airstrike", explosion: "Bombing/explosion",
+        shooting: "Armed assault", terror: "Mass violence / terror", protest: "Violent protest",
+        civil: "Civil unrest", robbery: "Robbery", kidnapping: "Abduction",
+        arson: "Arson", cyber: "Cyber attack",
+      };
+      const title = `${TYPE_LABELS[cls.type]} — ${fullName}`;
+
+      out.push({
+        external_id: `gdelt-evt-${eventId}`,
+        title: title.slice(0, 200),
+        summary: `Reported event near ${fullName}. Auto-classified from GDELT (CAMEO ${eventCode}).`,
+        type: cls.type,
+        severity: cls.severity,
+        lat,
+        lng,
+        location: fullName,
+        country,
+        source: sourceUrl ? new URL(sourceUrl).hostname.replace(/^www\./, "") : "GDELT",
+        source_url: sourceUrl,
+        occurred_at: occurred,
+      });
+    }
+    return out;
+  } catch (e) {
+    console.error("GDELT Events error", e instanceof Error ? e.message : e);
+    return [];
+  }
+}
+
+// Minimal ZIP reader: parse local file header, inflate raw deflate.
+async function unzipFirstFile(buf: Uint8Array): Promise<string | null> {
+  // Local file header signature: 0x04034b50 (little-endian)
+  if (buf.length < 30) return null;
+  const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  const sig = view.getUint32(0, true);
+  if (sig !== 0x04034b50) return null;
+  const compressionMethod = view.getUint16(8, true);
+  const compressedSize = view.getUint32(18, true);
+  const fileNameLength = view.getUint16(26, true);
+  const extraLength = view.getUint16(28, true);
+  const dataStart = 30 + fileNameLength + extraLength;
+  const compressed = buf.subarray(dataStart, dataStart + compressedSize);
+  if (compressionMethod === 0) {
+    return new TextDecoder("latin1").decode(compressed);
+  }
+  if (compressionMethod !== 8) {
+    console.error("Unsupported zip compression", compressionMethod);
+    return null;
+  }
+  // Use DecompressionStream("deflate-raw")
+  const stream = new Blob([compressed]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+  const ab = await new Response(stream).arrayBuffer();
+  return new TextDecoder("latin1").decode(new Uint8Array(ab));
+}
+
+// =====================================================================
+// AI classification for Doc API articles
+// =====================================================================
 async function classifyBatch(items: { id: string; title: string; snippet: string; country?: string }[]) {
   if (items.length === 0) return [];
-
   const sys =
     "You classify real-world incident headlines into a strict taxonomy. Return only valid tool calls. " +
     "Allowed types: war, airstrike, explosion, shooting, terror, protest, civil, robbery, kidnapping, arson, cyber. " +
@@ -114,13 +257,9 @@ async function classifyBatch(items: { id: string; title: string; snippet: string
     "If the headline does not clearly identify a country of occurrence, set event_country to null and the item will be discarded.";
 
   const user = JSON.stringify(items);
-
   const resp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
     method: "POST",
-    headers: {
-      Authorization: `Bearer ${LOVABLE_API_KEY}`,
-      "Content-Type": "application/json",
-    },
+    headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
     body: JSON.stringify({
       model: "google/gemini-2.5-flash",
       messages: [
@@ -141,17 +280,11 @@ async function classifyBatch(items: { id: string; title: string; snippet: string
                   type: "object",
                   properties: {
                     id: { type: "string" },
-                    type: {
-                      type: ["string", "null"],
-                      enum: [...ALLOWED_TYPES, null],
-                    },
-                    severity: {
-                      type: "string",
-                      enum: ["low", "tension", "active", "war"],
-                    },
+                    type: { type: ["string", "null"], enum: [...ALLOWED_TYPES, null] },
+                    severity: { type: "string", enum: ["low", "tension", "active", "war"] },
                     short_summary: { type: "string" },
-                    location: { type: ["string", "null"], description: "City or specific place where the incident occurred" },
-                    event_country: { type: ["string", "null"], description: "Country where the incident physically occurred (NOT the news outlet's country)" },
+                    location: { type: ["string", "null"], description: "City or specific place" },
+                    event_country: { type: ["string", "null"], description: "Country where the event occurred" },
                   },
                   required: ["id", "type", "severity", "short_summary", "event_country"],
                   additionalProperties: false,
@@ -166,164 +299,164 @@ async function classifyBatch(items: { id: string; title: string; snippet: string
       tool_choice: { type: "function", function: { name: "classify_incidents" } },
     }),
   });
-
-  if (!resp.ok) {
-    const txt = await resp.text();
-    console.error("AI classify failed", resp.status, txt);
-    return [];
-  }
-
+  if (!resp.ok) { console.error("AI classify failed", resp.status, await resp.text()); return []; }
   const data = await resp.json();
   const call = data.choices?.[0]?.message?.tool_calls?.[0];
   if (!call) return [];
-  try {
-    const args = JSON.parse(call.function.arguments);
-    return args.results ?? [];
-  } catch (e) {
-    console.error("Failed to parse AI args", e);
-    return [];
-  }
+  try { return JSON.parse(call.function.arguments).results ?? []; }
+  catch (e) { console.error("Failed to parse AI args", e); return []; }
 }
 
-// --- Main handler --------------------------------------------------------
+// FIPS country code -> centroid (for Doc API fallback)
+const COUNTRY_CENTROIDS: Record<string, [number, number]> = {
+  "United States": [39.8, -98.6], "Mexico": [23.6, -102.5], "Canada": [56, -106],
+  "United Kingdom": [54, -2], "France": [46.2, 2.2], "Germany": [51, 10],
+  "Sweden": [62, 16], "Norway": [62, 10], "Denmark": [56, 10], "Finland": [64, 26],
+  "Russia": [61, 100], "Ukraine": [49, 32], "Poland": [52, 19],
+  "Israel": [31.5, 34.8], "Palestine": [31.9, 35.2], "Lebanon": [33.9, 35.9],
+  "Syria": [35, 38], "Iraq": [33, 44], "Iran": [32, 53], "Yemen": [15.5, 48],
+  "Saudi Arabia": [24, 45], "Egypt": [27, 30], "Turkey": [39, 35],
+  "Sudan": [15.5, 32.5], "South Sudan": [7, 30], "Ethiopia": [9, 40],
+  "Somalia": [5, 46], "Kenya": [-1, 38], "Nigeria": [10, 8], "Mali": [17, -4],
+  "Burkina Faso": [12, -1], "Niger": [17, 8], "Libya": [26, 17],
+  "DR Congo": [-2, 23], "Congo": [-1, 15], "Cameroon": [6, 12],
+  "South Africa": [-29, 24], "Mozambique": [-18, 35],
+  "India": [21, 78], "Pakistan": [30, 70], "Afghanistan": [33, 65],
+  "Bangladesh": [24, 90], "Sri Lanka": [7, 81], "Nepal": [28, 84],
+  "China": [35, 105], "Japan": [36, 138], "South Korea": [36, 128],
+  "North Korea": [40, 127], "Taiwan": [23.7, 121],
+  "Philippines": [13, 122], "Indonesia": [-2, 118], "Thailand": [15, 100],
+  "Vietnam": [16, 107], "Myanmar": [21, 96], "Malaysia": [4, 102],
+  "Australia": [-25, 134], "New Zealand": [-41, 174],
+  "Brazil": [-14, -51], "Argentina": [-38, -63], "Colombia": [4, -73],
+  "Venezuela": [8, -66], "Peru": [-9, -75], "Chile": [-30, -71],
+  "Ecuador": [-1, -78], "Bolivia": [-16, -65], "Haiti": [19, -72],
+  "Italy": [42, 12], "Spain": [40, -3], "Greece": [39, 22],
+  "Belgium": [50, 4], "Netherlands": [52, 5], "Switzerland": [47, 8],
+  "Austria": [47, 14], "Czech Republic": [49.7, 15.4], "Hungary": [47, 19],
+  "Romania": [45, 25], "Bulgaria": [42, 25], "Serbia": [44, 21],
+  "Bosnia and Herzegovina": [44, 18], "Kosovo": [42.6, 21],
+};
+
+async function processDocApi(supabase: any): Promise<number> {
+  const articles = await fetchGdeltDoc();
+  console.log(`GDELT Doc returned ${articles.length} articles`);
+  if (articles.length === 0) return 0;
+
+  const candidates = articles.slice(0, 80).map((a: any, i: number) => ({
+    id: `gdelt-${a.url ? btoa(a.url).slice(0, 24) : i}`,
+    title: (a.title ?? "").slice(0, 240),
+    snippet: (a.title ?? "").slice(0, 240),
+    country: a.sourcecountry,
+    url: a.url,
+    seendate: a.seendate,
+    domain: a.domain,
+  }));
+
+  const ids = candidates.map((c) => c.id);
+  const { data: existing } = await supabase.from("incidents").select("external_id").in("external_id", ids);
+  const existingSet = new Set((existing ?? []).map((r: any) => r.external_id));
+  const fresh = candidates.filter((c) => !existingSet.has(c.id));
+  console.log(`Doc fresh after dedup: ${fresh.length}`);
+  if (fresh.length === 0) return 0;
+
+  const classified: any[] = [];
+  for (let i = 0; i < fresh.length; i += 25) {
+    const chunk = fresh.slice(i, i + 25).map((c) => ({
+      id: c.id, title: c.title, snippet: c.snippet, country: c.country,
+    }));
+    const results = await classifyBatch(chunk);
+    classified.push(...results);
+  }
+
+  const byId = new Map(classified.map((r: any) => [r.id, r]));
+  const rows: NormalizedIncident[] = [];
+  for (const c of fresh) {
+    const cls = byId.get(c.id);
+    if (!cls || !cls.type) continue;
+    if (!ALLOWED_TYPES.includes(cls.type)) continue;
+    const eventCountry: string | null = cls.event_country ?? null;
+    if (!eventCountry) continue;
+    const centroid = COUNTRY_CENTROIDS[eventCountry];
+    if (!centroid) continue;
+    const jitter = () => (Math.random() - 0.5) * 1.5;
+    const occurred = parseSeenDate(c.seendate) ?? new Date().toISOString();
+    rows.push({
+      external_id: c.id,
+      title: c.title || "Untitled incident",
+      summary: cls.short_summary ?? "",
+      type: cls.type,
+      severity: cls.severity ?? "tension",
+      lat: centroid[0] + jitter(),
+      lng: centroid[1] + jitter(),
+      location: cls.location ?? eventCountry,
+      country: eventCountry,
+      source: c.domain ?? "GDELT",
+      source_url: c.url ?? null,
+      occurred_at: occurred,
+    });
+  }
+
+  if (rows.length === 0) return 0;
+  const { error } = await supabase.from("incidents").upsert(rows, { onConflict: "external_id", ignoreDuplicates: true });
+  if (error) { console.error("Doc insert failed:", error); return 0; }
+  return rows.length;
+}
+
+async function processEvents(supabase: any): Promise<number> {
+  const events = await fetchGdeltEvents();
+  console.log(`GDELT Events parsed: ${events.length}`);
+  if (events.length === 0) return 0;
+
+  // Dedup against DB
+  const ids = events.map((e) => e.external_id);
+  const { data: existing } = await supabase.from("incidents").select("external_id").in("external_id", ids);
+  const existingSet = new Set((existing ?? []).map((r: any) => r.external_id));
+  const fresh = events.filter((e) => !existingSet.has(e.external_id));
+  console.log(`Events fresh after dedup: ${fresh.length}`);
+  if (fresh.length === 0) return 0;
+
+  // Insert in batches of 200 to be safe
+  let inserted = 0;
+  for (let i = 0; i < fresh.length; i += 200) {
+    const batch = fresh.slice(i, i + 200);
+    const { error } = await supabase.from("incidents").upsert(batch, { onConflict: "external_id", ignoreDuplicates: true });
+    if (error) { console.error("Events insert failed:", error); break; }
+    inserted += batch.length;
+  }
+  return inserted;
+}
+
+// =====================================================================
+// Main handler
+// =====================================================================
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders });
 
-  try {
-    const supabase = createClient(SUPABASE_URL, SERVICE_ROLE);
+  const supabase = createClient(SUPABASE_URL, SERVICE_ROLE);
 
-    const articles = await fetchGdelt();
-    console.log(`GDELT returned ${articles.length} articles`);
-
-    // Pre-filter: must have lat/lng-able location info.
-    // GDELT ArtList includes "domain", "title", "url", "seendate", "socialimage", "sourcecountry".
-    // It does NOT always include coordinates per article. We use the article and country for AI to validate;
-    // when missing coords we fall back to country centroid below.
-    const country_centroids: Record<string, [number, number]> = {
-      "United States": [39.8, -98.6], "Mexico": [23.6, -102.5], "Canada": [56, -106],
-      "United Kingdom": [54, -2], "France": [46.2, 2.2], "Germany": [51, 10],
-      "Sweden": [62, 16], "Norway": [62, 10], "Denmark": [56, 10], "Finland": [64, 26],
-      "Russia": [61, 100], "Ukraine": [49, 32], "Poland": [52, 19],
-      "Israel": [31.5, 34.8], "Palestine": [31.9, 35.2], "Lebanon": [33.9, 35.9],
-      "Syria": [35, 38], "Iraq": [33, 44], "Iran": [32, 53], "Yemen": [15.5, 48],
-      "Saudi Arabia": [24, 45], "Egypt": [27, 30], "Turkey": [39, 35],
-      "Sudan": [15.5, 32.5], "South Sudan": [7, 30], "Ethiopia": [9, 40],
-      "Somalia": [5, 46], "Kenya": [-1, 38], "Nigeria": [10, 8], "Mali": [17, -4],
-      "Burkina Faso": [12, -1], "Niger": [17, 8], "Libya": [26, 17],
-      "DR Congo": [-2, 23], "Congo": [-1, 15], "Cameroon": [6, 12],
-      "South Africa": [-29, 24], "Mozambique": [-18, 35],
-      "India": [21, 78], "Pakistan": [30, 70], "Afghanistan": [33, 65],
-      "Bangladesh": [24, 90], "Sri Lanka": [7, 81], "Nepal": [28, 84],
-      "China": [35, 105], "Japan": [36, 138], "South Korea": [36, 128],
-      "North Korea": [40, 127], "Taiwan": [23.7, 121],
-      "Philippines": [13, 122], "Indonesia": [-2, 118], "Thailand": [15, 100],
-      "Vietnam": [16, 107], "Myanmar": [21, 96], "Malaysia": [4, 102],
-      "Australia": [-25, 134], "New Zealand": [-41, 174],
-      "Brazil": [-14, -51], "Argentina": [-38, -63], "Colombia": [4, -73],
-      "Venezuela": [8, -66], "Peru": [-9, -75], "Chile": [-30, -71],
-      "Ecuador": [-1, -78], "Bolivia": [-16, -65], "Haiti": [19, -72],
-      "Italy": [42, 12], "Spain": [40, -3], "Greece": [39, 22],
-      "Belgium": [50, 4], "Netherlands": [52, 5], "Switzerland": [47, 8],
-      "Austria": [47, 14], "Czech Republic": [49.7, 15.4], "Hungary": [47, 19],
-      "Romania": [45, 25], "Bulgaria": [42, 25], "Serbia": [44, 21],
-      "Bosnia and Herzegovina": [44, 18], "Kosovo": [42.6, 21],
-    };
-
-    // Build candidate list for AI
-    const candidates = articles.slice(0, 60).map((a: any, i: number) => ({
-      id: `gdelt-${a.url ? btoa(a.url).slice(0, 24) : i}`,
-      title: (a.title ?? "").slice(0, 240),
-      snippet: (a.title ?? "").slice(0, 240),
-      country: a.sourcecountry,
-      url: a.url,
-      seendate: a.seendate,
-      domain: a.domain,
-    }));
-
-    // Dedup by external_id against DB to skip already-ingested
-    const ids = candidates.map((c) => c.id);
-    const { data: existing } = await supabase
-      .from("incidents")
-      .select("external_id")
-      .in("external_id", ids);
-    const existingSet = new Set((existing ?? []).map((r) => r.external_id));
-    const fresh = candidates.filter((c) => !existingSet.has(c.id));
-    console.log(`Fresh candidates after dedup: ${fresh.length}`);
-
-    if (fresh.length === 0) {
-      return new Response(JSON.stringify({ ingested: 0, message: "no fresh items" }), {
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+  // Run both pipelines in background so we can return quickly.
+  const job = (async () => {
+    try {
+      const [eventsCount, docCount] = await Promise.all([
+        processEvents(supabase).catch((e) => { console.error("events pipeline error", e); return 0; }),
+        processDocApi(supabase).catch((e) => { console.error("doc pipeline error", e); return 0; }),
+      ]);
+      console.log(`Ingest complete: events=${eventsCount}, doc=${docCount}`);
+    } catch (e) {
+      console.error("Background ingest error:", e);
     }
+  })();
 
-    // Classify in chunks of 20
-    const classified: any[] = [];
-    for (let i = 0; i < fresh.length; i += 20) {
-      const chunk = fresh.slice(i, i + 20).map((c) => ({
-        id: c.id, title: c.title, snippet: c.snippet, country: c.country,
-      }));
-      const results = await classifyBatch(chunk);
-      classified.push(...results);
-    }
-
-    const byId = new Map(classified.map((r: any) => [r.id, r]));
-    const rows: NormalizedIncident[] = [];
-
-    for (const c of fresh) {
-      const cls = byId.get(c.id);
-      if (!cls || !cls.type) continue;
-      if (!ALLOWED_TYPES.includes(cls.type)) continue;
-
-      // Use the EVENT country (where the incident actually happened), not the news outlet's country.
-      const eventCountry: string | null = cls.event_country ?? null;
-      if (!eventCountry) continue;
-      const centroid = country_centroids[eventCountry];
-      if (!centroid) continue; // skip if we cannot geolocate the event country
-      // Add small jitter so multiple incidents in same country don't all sit on identical point
-      const jitter = () => (Math.random() - 0.5) * 1.5;
-      const lat = centroid[0] + jitter();
-      const lng = centroid[1] + jitter();
-
-      const occurred = parseSeenDate(c.seendate) ?? new Date().toISOString();
-
-      rows.push({
-        external_id: c.id,
-        title: c.title || "Untitled incident",
-        summary: cls.short_summary ?? "",
-        type: cls.type,
-        severity: cls.severity ?? "tension",
-        lat,
-        lng,
-        location: cls.location ?? eventCountry,
-        country: eventCountry,
-        source: c.domain ?? "GDELT",
-        source_url: c.url ?? null,
-        occurred_at: occurred,
-      });
-    }
-
-    if (rows.length > 0) {
-      const { error } = await supabase
-        .from("incidents")
-        .upsert(rows, { onConflict: "external_id", ignoreDuplicates: true });
-      if (error) {
-        console.error("Insert failed:", error);
-        return new Response(JSON.stringify({ error: error.message }), {
-          status: 500,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
-      }
-    }
-
-    return new Response(
-      JSON.stringify({ ingested: rows.length, fetched: articles.length }),
-      { headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
-  } catch (e) {
-    console.error("ingest error:", e);
-    return new Response(
-      JSON.stringify({ error: e instanceof Error ? e.message : "unknown" }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+  // Keep the function alive until the background work finishes.
+  // @ts-ignore EdgeRuntime is provided by Supabase Edge runtime.
+  if (typeof EdgeRuntime !== "undefined" && EdgeRuntime.waitUntil) {
+    // @ts-ignore
+    EdgeRuntime.waitUntil(job);
   }
+
+  return new Response(
+    JSON.stringify({ status: "accepted", message: "Ingestion running in background." }),
+    { status: 202, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+  );
 });
