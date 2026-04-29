@@ -21,6 +21,9 @@ export interface Incident {
   type: ConflictType;
   verification: Verification;
   source: string;
+  lat?: number;
+  lng?: number;
+  location?: string;
 }
 
 export interface Conflict {
