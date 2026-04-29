@@ -1,5 +1,16 @@
 export type Severity = "low" | "tension" | "active" | "war";
-export type ConflictType = "war" | "protest" | "terror" | "civil" | "cyber";
+export type ConflictType =
+  | "war"
+  | "protest"
+  | "terror"
+  | "civil"
+  | "cyber"
+  | "explosion"
+  | "shooting"
+  | "robbery"
+  | "arson"
+  | "kidnapping"
+  | "airstrike";
 export type Verification = "unverified" | "partial" | "verified";
 
 export interface Incident {
