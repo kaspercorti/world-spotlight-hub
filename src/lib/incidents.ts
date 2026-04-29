@@ -1,4 +1,39 @@
-import type { Severity, Verification, ConflictType } from "@/data/conflicts";
+// Live incident model — replaces the old static conflicts dataset.
+
+export type Severity = "low" | "tension" | "active" | "war";
+export type IncidentType =
+  | "war"
+  | "airstrike"
+  | "explosion"
+  | "shooting"
+  | "terror"
+  | "protest"
+  | "civil"
+  | "robbery"
+  | "kidnapping"
+  | "arson"
+  | "cyber";
+
+export interface Incident {
+  id: string;
+  external_id: string;
+  title: string;
+  summary: string | null;
+  type: IncidentType;
+  severity: Severity;
+  lat: number;
+  lng: number;
+  location: string | null;
+  country: string | null;
+  source: string | null;
+  source_url: string | null;
+  occurred_at: string;
+}
+
+export const ALL_TYPES: IncidentType[] = [
+  "war", "airstrike", "explosion", "shooting", "terror",
+  "protest", "civil", "robbery", "kidnapping", "arson", "cyber",
+];
 
 export const severityMeta: Record<Severity, { label: string; color: string; ring: string; rank: number }> = {
   low: { label: "Low risk", color: "hsl(var(--risk-low))", ring: "bg-risk-low", rank: 1 },
@@ -7,13 +42,7 @@ export const severityMeta: Record<Severity, { label: string; color: string; ring
   war: { label: "High-intensity war", color: "hsl(var(--risk-war))", ring: "bg-risk-war", rank: 4 },
 };
 
-export const verificationMeta: Record<Verification, { label: string; className: string }> = {
-  verified: { label: "Verified", className: "text-verified border-verified/40 bg-verified/10" },
-  partial: { label: "Partial", className: "text-partial border-partial/40 bg-partial/10" },
-  unverified: { label: "Unverified", className: "text-unverified border-unverified/40 bg-unverified/10" },
-};
-
-export const typeMeta: Record<ConflictType, { label: string; icon: string }> = {
+export const typeMeta: Record<IncidentType, { label: string; icon: string }> = {
   war: { label: "War", icon: "⚔" },
   protest: { label: "Protest", icon: "✊" },
   terror: { label: "Terror attack", icon: "✦" },

@@ -5,46 +5,30 @@ import { FiltersPanel, type TimeRange } from "@/components/FiltersPanel";
 import { ConflictDetail } from "@/components/ConflictDetail";
 import { LiveFeed } from "@/components/LiveFeed";
 import { Legend } from "@/components/Legend";
-import { conflicts as ALL, type ConflictType, type Severity } from "@/data/conflicts";
-import { severityMeta } from "@/lib/conflict-utils";
-
-const ALL_TYPES: ConflictType[] = ["war", "airstrike", "explosion", "shooting", "terror", "protest", "civil", "robbery", "kidnapping", "arson", "cyber"];
+import { ALL_TYPES, severityMeta, type IncidentType, type Severity } from "@/lib/incidents";
+import { useIncidents } from "@/hooks/useIncidents";
 
 const Index = () => {
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [selectedIncidentId, setSelectedIncidentId] = useState<string | null>(null);
-  const [types, setTypes] = useState<Set<ConflictType>>(new Set(ALL_TYPES));
+  const [types, setTypes] = useState<Set<IncidentType>>(new Set(ALL_TYPES));
   const [minSeverity, setMinSeverity] = useState<Severity>("low");
   const [timeRange, setTimeRange] = useState<TimeRange>("24h");
 
-  const handleSelect = (id: string, incidentId?: string) => {
-    setSelectedId(id);
-    setSelectedIncidentId(incidentId ?? null);
-  };
-
-  const cutoff = useMemo(() => {
-    const hours = timeRange === "24h" ? 24 : 48;
-    return Date.now() - hours * 3600 * 1000;
-  }, [timeRange]);
+  const hours = timeRange === "24h" ? 24 : 48;
+  const { incidents, lastUpdated } = useIncidents(hours);
 
   const filtered = useMemo(() => {
-    return ALL.filter((c) => {
-      // Match if conflict type OR any incident type is selected
-      const typeMatch = types.has(c.type) || c.recent.some((r) => types.has(r.type));
-      if (!typeMatch) return false;
-      if (severityMeta[c.severity].rank < severityMeta[minSeverity].rank) return false;
-      // Strict: must have an incident within the window, or have started within it
-      const hasRecent = c.recent.some((r) => +new Date(r.timestamp) >= cutoff);
-      const startedInWindow = +new Date(c.startedAt) >= cutoff;
-      return hasRecent || startedInWindow;
+    return incidents.filter((i) => {
+      if (!types.has(i.type)) return false;
+      if (severityMeta[i.severity].rank < severityMeta[minSeverity].rank) return false;
+      return true;
     });
-  }, [types, minSeverity, cutoff]);
+  }, [incidents, types, minSeverity]);
 
-  const selected = filtered.find((c) => c.id === selectedId) ?? ALL.find((c) => c.id === selectedId) ?? null;
-  const totalIncidents = filtered.reduce((s, c) => s + c.incidents24h, 0);
-  const activeCount = filtered.filter((c) => c.severity === "active" || c.severity === "war").length;
+  const selected = filtered.find((i) => i.id === selectedId) ?? incidents.find((i) => i.id === selectedId) ?? null;
+  const highSeverityCount = filtered.filter((i) => i.severity === "active" || i.severity === "war").length;
 
-  const toggleType = (t: ConflictType) =>
+  const toggleType = (t: IncidentType) =>
     setTypes((prev) => {
       const next = new Set(prev);
       next.has(t) ? next.delete(t) : next.add(t);
@@ -53,11 +37,20 @@ const Index = () => {
 
   return (
     <main className="relative h-screen w-screen overflow-hidden bg-background">
-      <ConflictMap conflicts={filtered} activeTypes={types} incidentCutoff={cutoff} selectedId={selectedId} onSelect={handleSelect} />
+      <ConflictMap
+        incidents={filtered}
+        activeTypes={types}
+        selectedId={selectedId}
+        onSelect={setSelectedId}
+      />
 
-      <TopBar activeCount={activeCount} totalIncidents={totalIncidents} />
+      <TopBar
+        totalIncidents={filtered.length}
+        highSeverityCount={highSeverityCount}
+        lastUpdated={lastUpdated}
+      />
       <Legend />
-      <LiveFeed onSelect={(id) => handleSelect(id)} />
+      <LiveFeed incidents={filtered} onSelect={setSelectedId} />
 
       <FiltersPanel
         types={types}
@@ -69,14 +62,7 @@ const Index = () => {
       />
 
       {selected && (
-        <ConflictDetail
-          conflict={selected}
-          highlightIncidentId={selectedIncidentId}
-          onClose={() => {
-            setSelectedId(null);
-            setSelectedIncidentId(null);
-          }}
-        />
+        <ConflictDetail incident={selected} onClose={() => setSelectedId(null)} />
       )}
     </main>
   );

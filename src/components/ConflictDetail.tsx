@@ -1,26 +1,19 @@
-import { X, MapPin, Users, AlertTriangle, Clock, ExternalLink } from "lucide-react";
-import type { Conflict } from "@/data/conflicts";
-import { severityMeta, verificationMeta, typeMeta, timeAgo } from "@/lib/conflict-utils";
+import { X, MapPin, AlertTriangle, Clock, ExternalLink } from "lucide-react";
+import { severityMeta, typeMeta, timeAgo, type Incident } from "@/lib/incidents";
 import { cn } from "@/lib/utils";
 
 export function ConflictDetail({
-  conflict,
-  highlightIncidentId,
+  incident,
   onClose,
 }: {
-  conflict: Conflict;
-  highlightIncidentId?: string | null;
+  incident: Incident;
   onClose: () => void;
 }) {
-  const sev = severityMeta[conflict.severity];
-  const focused = highlightIncidentId
-    ? conflict.recent.find((r) => r.id === highlightIncidentId) ?? null
-    : null;
-  const others = focused ? conflict.recent.filter((r) => r.id !== focused.id) : conflict.recent;
+  const sev = severityMeta[incident.severity];
+  const type = typeMeta[incident.type];
 
   return (
     <aside className="pointer-events-auto absolute right-0 top-0 z-[1001] flex h-full w-full max-w-md flex-col border-l border-border bg-gradient-panel backdrop-blur-xl shadow-panel animate-slide-in-right">
-      {/* Header — when an incident is focused, show IT as the primary subject */}
       <div className="flex items-start justify-between gap-3 border-b border-border p-5">
         <div className="min-w-0">
           <div className="mb-2 flex items-center gap-2">
@@ -29,24 +22,20 @@ export function ConflictDetail({
               style={{ boxShadow: `0 0 12px ${sev.color}` }}
             />
             <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-              {focused ? `${typeMeta[focused.type].label} · ${verificationMeta[focused.verification].label}` : `${sev.label} · risk ${conflict.riskLevel}/10`}
+              {type.label} · {sev.label}
             </span>
           </div>
-          <h2 className="text-xl font-semibold leading-tight">
-            {focused ? focused.title : conflict.name}
-          </h2>
+          <h2 className="text-xl font-semibold leading-tight">{incident.title}</h2>
           <div className="mt-1.5 flex items-center gap-1.5 text-xs text-muted-foreground">
             <MapPin className="h-3 w-3" />
             <span>
-              {focused?.location ? `${focused.location} · ` : ""}{conflict.country} · {conflict.region}
+              {incident.location ?? incident.country ?? "Unknown location"}
             </span>
           </div>
-          {focused && (
-            <div className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
-              <Clock className="h-3 w-3" />
-              <span>{timeAgo(focused.timestamp)} · {focused.source}</span>
-            </div>
-          )}
+          <div className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Clock className="h-3 w-3" />
+            <span>{timeAgo(incident.occurred_at)} · {incident.source ?? "Unknown source"}</span>
+          </div>
         </div>
         <button
           onClick={onClose}
@@ -56,101 +45,37 @@ export function ConflictDetail({
         </button>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-3 gap-px bg-border">
-        <Stat label="Incidents 24h" value={conflict.incidents24h.toString()} />
-        <Stat
-          label="Type"
-          value={`${typeMeta[focused ? focused.type : conflict.type].icon} ${typeMeta[focused ? focused.type : conflict.type].label}`}
-        />
-        <Stat label="Started" value={new Date(conflict.startedAt).getFullYear().toString()} />
-      </div>
-
       <div className="flex-1 overflow-y-auto scrollbar-thin">
-        {/* Primary description — the focused incident if any, otherwise the conflict overview */}
-        <Section title={focused ? "Event details" : "Summary"}>
+        <Section title="Event details">
           <p className="text-sm leading-relaxed text-foreground/90">
-            {focused ? focused.summary : conflict.summary}
+            {incident.summary || "No summary available."}
           </p>
-          {focused && (
-            <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
-              Part of <span className="text-foreground/80">{conflict.name}</span> — {conflict.summary}
-            </p>
-          )}
         </Section>
 
-        {/* Actors */}
-        <Section title="Actors" icon={<Users className="h-3 w-3" />}>
-          <div className="flex flex-wrap gap-1.5">
-            {conflict.actors.map((a) => (
-              <span key={a} className="rounded border border-border bg-secondary/50 px-2 py-0.5 font-mono text-[11px] text-foreground/80">
-                {a}
-              </span>
-            ))}
-          </div>
-        </Section>
+        {incident.source_url && (
+          <Section title="Source" icon={<ExternalLink className="h-3 w-3" />}>
+            <a
+              href={incident.source_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="break-all text-xs text-primary hover:underline"
+            >
+              {incident.source_url}
+            </a>
+          </Section>
+        )}
 
-        {/* Timeline — other recent events in the same area */}
-        <Section title={focused ? "Other recent events in area" : "Recent events"} icon={<Clock className="h-3 w-3" />}>
-          {others.length === 0 ? (
-            <p className="text-xs text-muted-foreground">No other recent events recorded.</p>
-          ) : (
-            <ol className="relative space-y-3 border-l border-border pl-4">
-              {others.map((ev) => {
-                const v = verificationMeta[ev.verification];
-                return (
-                  <li key={ev.id} className="relative">
-                    <span className="absolute -left-[21px] top-1.5 h-2 w-2 rounded-full bg-accent ring-2 ring-background" />
-                    <div className="flex items-baseline justify-between gap-2">
-                      <p className="text-sm font-medium leading-snug">{ev.title}</p>
-                      <span className="shrink-0 font-mono text-[10px] text-muted-foreground">{timeAgo(ev.timestamp)}</span>
-                    </div>
-                    <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">{ev.summary}</p>
-                    <div className="mt-1.5 flex items-center gap-2">
-                      <span className={cn("rounded border px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider", v.className)}>
-                        {v.label}
-                      </span>
-                      <span className="font-mono text-[10px] text-muted-foreground">{ev.source}</span>
-                    </div>
-                  </li>
-                );
-              })}
-            </ol>
-          )}
-        </Section>
-
-        {/* Sources */}
-        <Section title="Sources" icon={<ExternalLink className="h-3 w-3" />}>
-          <div className="flex flex-wrap gap-1.5">
-            {conflict.sources.map((s) => (
-              <span key={s} className="rounded border border-accent/30 bg-accent/10 px-2 py-0.5 font-mono text-[11px] text-accent">
-                {s}
-              </span>
-            ))}
-          </div>
-        </Section>
-
-        {/* Disclaimer */}
         <div className="m-5 mt-2 rounded-md border border-border bg-secondary/30 p-3">
           <div className="mb-1 flex items-center gap-1.5 text-risk-tension">
             <AlertTriangle className="h-3 w-3" />
             <span className="font-mono text-[10px] uppercase tracking-widest">Disclaimer</span>
           </div>
           <p className="text-[11px] leading-relaxed text-muted-foreground">
-            Information is aggregated from open sources and may evolve. Avoid acting on unverified reports.
+            Information is aggregated from open sources (GDELT) and AI-classified. Verify with primary sources before acting.
           </p>
         </div>
       </div>
     </aside>
-  );
-}
-
-function Stat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="bg-card/60 px-3 py-3">
-      <div className="font-mono text-[9px] uppercase tracking-widest text-muted-foreground">{label}</div>
-      <div className="mt-1 truncate text-sm font-semibold text-foreground">{value}</div>
-    </div>
   );
 }
 

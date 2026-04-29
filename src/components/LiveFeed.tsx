@@ -1,19 +1,19 @@
 import { useState } from "react";
-import { ChevronLeft, ChevronRight, Activity } from "lucide-react";
-import { allIncidents } from "@/data/conflicts";
-import { severityMeta, typeMeta, timeAgo, verificationMeta } from "@/lib/conflict-utils";
+import { ChevronLeft, Activity } from "lucide-react";
+import { severityMeta, typeMeta, timeAgo, type Incident } from "@/lib/incidents";
 import { cn } from "@/lib/utils";
 
 interface Props {
-  onSelect: (conflictId: string) => void;
+  incidents: Incident[];
+  onSelect: (incidentId: string) => void;
 }
 
-export function LiveFeed({ onSelect }: Props) {
+export function LiveFeed({ incidents, onSelect }: Props) {
   const [open, setOpen] = useState(() => typeof window !== "undefined" && window.innerWidth >= 768);
   const [sort, setSort] = useState<"recent" | "severe">("recent");
 
-  const items = [...allIncidents].sort((a, b) => {
-    if (sort === "recent") return +new Date(b.timestamp) - +new Date(a.timestamp);
+  const items = [...incidents].sort((a, b) => {
+    if (sort === "recent") return +new Date(b.occurred_at) - +new Date(a.occurred_at);
     return severityMeta[b.severity].rank - severityMeta[a.severity].rank;
   });
 
@@ -21,9 +21,7 @@ export function LiveFeed({ onSelect }: Props) {
     <aside
       className={cn(
         "pointer-events-auto absolute left-0 top-0 z-[1000] flex h-full flex-col transition-[width] duration-300",
-        open
-          ? "w-[320px] border-r border-border bg-gradient-panel backdrop-blur-xl"
-          : "w-0 border-r-0 bg-transparent"
+        open ? "w-[320px] border-r border-border bg-gradient-panel backdrop-blur-xl" : "w-0 border-r-0 bg-transparent"
       )}
     >
       <button
@@ -60,13 +58,17 @@ export function LiveFeed({ onSelect }: Props) {
           </div>
 
           <ul className="flex-1 overflow-y-auto scrollbar-thin">
+            {items.length === 0 && (
+              <li className="p-6 text-center font-mono text-[11px] text-muted-foreground">
+                Waiting for live incidents…
+              </li>
+            )}
             {items.map((it) => {
               const sev = severityMeta[it.severity];
-              const v = verificationMeta[it.verification];
               return (
                 <li key={it.id}>
                   <button
-                    onClick={() => onSelect(it.conflictId)}
+                    onClick={() => onSelect(it.id)}
                     className="group block w-full border-b border-border/60 px-4 py-3 text-left transition-colors hover:bg-secondary/40"
                   >
                     <div className="flex items-center justify-between gap-2">
@@ -76,10 +78,10 @@ export function LiveFeed({ onSelect }: Props) {
                           style={{ boxShadow: `0 0 8px ${sev.color}` }}
                         />
                         <span className="truncate font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-                          {it.conflictName}
+                          {it.location ?? it.country ?? "Unknown"}
                         </span>
                       </div>
-                      <span className="shrink-0 font-mono text-[10px] text-muted-foreground">{timeAgo(it.timestamp)}</span>
+                      <span className="shrink-0 font-mono text-[10px] text-muted-foreground">{timeAgo(it.occurred_at)}</span>
                     </div>
                     <p className="mt-1 line-clamp-2 text-sm leading-snug text-foreground group-hover:text-primary">
                       {it.title}
@@ -88,9 +90,9 @@ export function LiveFeed({ onSelect }: Props) {
                       <span className="rounded border border-border bg-secondary/50 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider text-muted-foreground">
                         {typeMeta[it.type].icon} {typeMeta[it.type].label}
                       </span>
-                      <span className={cn("rounded border px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-wider", v.className)}>
-                        {v.label}
-                      </span>
+                      {it.source && (
+                        <span className="font-mono text-[9px] text-muted-foreground">{it.source}</span>
+                      )}
                     </div>
                   </button>
                 </li>
