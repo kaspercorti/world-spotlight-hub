@@ -34,6 +34,25 @@ interface NormalizedIncident {
   source: string | null;
   source_url: string | null;
   occurred_at: string;
+  content_hash: string;
+}
+
+// Deterministic fingerprint to collapse duplicates of the same event reported
+// by many outlets. Combines normalized title + ~10km grid (1 decimal lat/lng).
+async function makeContentHash(title: string, lat: number, lng: number): Promise<string> {
+  const normTitle = (title || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const key = `${normTitle}:${lat.toFixed(1)}:${lng.toFixed(1)}`;
+  const buf = new TextEncoder().encode(key);
+  const hashBuf = await crypto.subtle.digest("SHA-1", buf);
+  return Array.from(new Uint8Array(hashBuf)).map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 32);
+}
+
+// Extract a stable article ID from GDELT article URLs (e.g. ".../news/national/26064793.foo-bar/")
+// so the same article syndicated to many local sites collapses into one row.
+function gdeltArticleKey(url: string): string {
+  const m = url.match(/(\d{7,})/);
+  if (m) return `art-${m[1]}`;
+  return url;
 }
 
 // =====================================================================
@@ -194,6 +213,7 @@ async function fetchGdeltEvents(): Promise<NormalizedIncident[]> {
       };
       const title = `${TYPE_LABELS[cls.type]} — ${fullName}`;
 
+      const content_hash = await makeContentHash(`${cls.type}:${fullName}`, lat, lng);
       out.push({
         external_id: `gdelt-evt-${eventId}`,
         title: title.slice(0, 200),
@@ -207,6 +227,7 @@ async function fetchGdeltEvents(): Promise<NormalizedIncident[]> {
         source: sourceUrl ? new URL(sourceUrl).hostname.replace(/^www\./, "") : "GDELT",
         source_url: sourceUrl,
         occurred_at: occurred,
+        content_hash,
       });
     }
     return out;
@@ -343,8 +364,18 @@ async function processDocApi(supabase: any): Promise<number> {
   console.log(`GDELT Doc returned ${articles.length} articles`);
   if (articles.length === 0) return 0;
 
-  const candidates = articles.slice(0, 80).map((a: any, i: number) => ({
-    id: `gdelt-${a.url ? btoa(a.url).slice(0, 24) : i}`,
+  // Collapse syndicated copies of the same article (same GDELT article ID across many local sites).
+  const byArticleKey = new Map<string, any>();
+  for (const a of articles) {
+    if (!a.url) continue;
+    const key = gdeltArticleKey(a.url);
+    if (!byArticleKey.has(key)) byArticleKey.set(key, a);
+  }
+  const unique = Array.from(byArticleKey.values());
+  console.log(`Doc unique articles after syndication-dedup: ${unique.length}`);
+
+  const candidates = unique.slice(0, 80).map((a: any, i: number) => ({
+    id: `gdelt-${gdeltArticleKey(a.url) || btoa(a.url).slice(0, 24) || i}`,
     title: (a.title ?? "").slice(0, 240),
     snippet: (a.title ?? "").slice(0, 240),
     country: a.sourcecountry,
@@ -380,27 +411,38 @@ async function processDocApi(supabase: any): Promise<number> {
     const centroid = COUNTRY_CENTROIDS[eventCountry];
     if (!centroid) continue;
     const jitter = () => (Math.random() - 0.5) * 1.5;
+    const lat = centroid[0] + jitter();
+    const lng = centroid[1] + jitter();
     const occurred = parseSeenDate(c.seendate) ?? new Date().toISOString();
+    const content_hash = await makeContentHash(c.title, lat, lng);
     rows.push({
       external_id: c.id,
       title: c.title || "Untitled incident",
       summary: cls.short_summary ?? "",
       type: cls.type,
       severity: cls.severity ?? "tension",
-      lat: centroid[0] + jitter(),
-      lng: centroid[1] + jitter(),
+      lat,
+      lng,
       location: cls.location ?? eventCountry,
       country: eventCountry,
       source: c.domain ?? "GDELT",
       source_url: c.url ?? null,
       occurred_at: occurred,
+      content_hash,
     });
   }
 
   if (rows.length === 0) return 0;
-  const { error } = await supabase.from("incidents").upsert(rows, { onConflict: "external_id", ignoreDuplicates: true });
+  // Dedup within batch on content_hash
+  const seen = new Set<string>();
+  const uniqueRows = rows.filter((r) => {
+    if (seen.has(r.content_hash)) return false;
+    seen.add(r.content_hash);
+    return true;
+  });
+  const { error } = await supabase.from("incidents").upsert(uniqueRows, { onConflict: "content_hash", ignoreDuplicates: true });
   if (error) { console.error("Doc insert failed:", error); return 0; }
-  return rows.length;
+  return uniqueRows.length;
 }
 
 async function processEvents(supabase: any): Promise<number> {
@@ -408,19 +450,26 @@ async function processEvents(supabase: any): Promise<number> {
   console.log(`GDELT Events parsed: ${events.length}`);
   if (events.length === 0) return 0;
 
-  // Dedup against DB
-  const ids = events.map((e) => e.external_id);
-  const { data: existing } = await supabase.from("incidents").select("external_id").in("external_id", ids);
-  const existingSet = new Set((existing ?? []).map((r: any) => r.external_id));
-  const fresh = events.filter((e) => !existingSet.has(e.external_id));
-  console.log(`Events fresh after dedup: ${fresh.length}`);
+  // Dedup within the batch on content_hash first.
+  const seenHash = new Set<string>();
+  const inBatchUnique = events.filter((e) => {
+    if (seenHash.has(e.content_hash)) return false;
+    seenHash.add(e.content_hash);
+    return true;
+  });
+  console.log(`Events unique in batch: ${inBatchUnique.length}`);
+
+  const hashes = inBatchUnique.map((e) => e.content_hash);
+  const { data: existing } = await supabase.from("incidents").select("content_hash").in("content_hash", hashes);
+  const existingSet = new Set((existing ?? []).map((r: any) => r.content_hash));
+  const fresh = inBatchUnique.filter((e) => !existingSet.has(e.content_hash));
+  console.log(`Events fresh after DB dedup: ${fresh.length}`);
   if (fresh.length === 0) return 0;
 
-  // Insert in batches of 200 to be safe
   let inserted = 0;
   for (let i = 0; i < fresh.length; i += 200) {
     const batch = fresh.slice(i, i + 200);
-    const { error } = await supabase.from("incidents").upsert(batch, { onConflict: "external_id", ignoreDuplicates: true });
+    const { error } = await supabase.from("incidents").upsert(batch, { onConflict: "content_hash", ignoreDuplicates: true });
     if (error) { console.error("Events insert failed:", error); break; }
     inserted += batch.length;
   }
