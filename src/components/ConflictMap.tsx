@@ -115,21 +115,21 @@ export function ConflictMap({ conflicts, selectedId, onSelect }: Props) {
 
   // Build per-incident markers (deterministic small offset for those without explicit coords)
   const incidentMarkers = useMemo(() => {
-    const items: { key: string; lat: number; lng: number; type: ConflictType; severity: Severity; conflictId: string; title: string }[] = [];
+    const items: { key: string; incidentId: string; lat: number; lng: number; type: ConflictType; severity: Severity; conflictId: string; title: string }[] = [];
     for (const c of conflicts) {
       for (let i = 0; i < c.recent.length; i++) {
         const ev = c.recent[i];
         let lat = ev.lat;
         let lng = ev.lng;
         if (lat == null || lng == null) {
-          // small deterministic offset around the conflict center so they don't all overlap
           const angle = (i / Math.max(c.recent.length, 1)) * Math.PI * 2;
-          const r = 0.9; // ~100km
+          const r = 0.9;
           lat = c.lat + Math.sin(angle) * r;
           lng = c.lng + Math.cos(angle) * r;
         }
         items.push({
           key: `${c.id}-${ev.id}`,
+          incidentId: ev.id,
           lat,
           lng,
           type: ev.type,
@@ -178,7 +178,7 @@ export function ConflictMap({ conflicts, selectedId, onSelect }: Props) {
             position={[m.lat, m.lng]}
             icon={makeIcon(m.type, m.severity, { small: true })}
             title={m.title}
-            eventHandlers={{ click: () => onSelect(m.conflictId) }}
+            eventHandlers={{ click: () => onSelect(m.conflictId, m.incidentId) }}
           />
         ))}
         <FlyTo conflict={selected} />
