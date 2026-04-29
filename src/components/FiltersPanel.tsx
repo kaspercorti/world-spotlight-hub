@@ -109,7 +109,8 @@ export function FiltersPanel(props: Props) {
             ))}
           </div>
         </div>
+        </div>
       </div>
-    </div>
+    </>
   );
 }
