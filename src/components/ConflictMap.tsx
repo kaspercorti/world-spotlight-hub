@@ -8,6 +8,7 @@ interface Props {
   conflicts: Conflict[];
   selectedId: string | null;
   activeTypes?: Set<ConflictType>;
+  incidentCutoff?: number;
   onSelect: (id: string, incidentId?: string) => void;
 }
 
@@ -212,9 +213,10 @@ function SpreadMarkers({
   );
 }
 
-export function ConflictMap({ conflicts, selectedId, activeTypes, onSelect }: Props) {
+export function ConflictMap({ conflicts, selectedId, activeTypes, incidentCutoff, onSelect }: Props) {
   const selected = conflicts.find((c) => c.id === selectedId) ?? null;
   const typeAllowed = (t: ConflictType) => !activeTypes || activeTypes.has(t);
+  const withinWindow = (ts: string) => !incidentCutoff || +new Date(ts) >= incidentCutoff;
 
   // Build a unified marker list (hubs + incidents) that the spreader can lay out.
   const allMarkers = useMemo<RawMarker[]>(() => {
@@ -235,6 +237,7 @@ export function ConflictMap({ conflicts, selectedId, activeTypes, onSelect }: Pr
       for (let i = 0; i < c.recent.length; i++) {
         const ev = c.recent[i];
         if (!typeAllowed(ev.type)) continue;
+        if (!withinWindow(ev.timestamp)) continue;
         let lat = ev.lat;
         let lng = ev.lng;
         if (lat == null || lng == null) {
@@ -258,7 +261,7 @@ export function ConflictMap({ conflicts, selectedId, activeTypes, onSelect }: Pr
     }
     return items;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [conflicts, activeTypes]);
+  }, [conflicts, activeTypes, incidentCutoff]);
 
   return (
     <div className="absolute inset-0 bg-background">

@@ -22,20 +22,25 @@ const Index = () => {
     setSelectedIncidentId(incidentId ?? null);
   };
 
+  const cutoff = useMemo(() => {
+    if (timeRange === "all") return 0;
+    const days = timeRange === "24h" ? 1 : timeRange === "7d" ? 7 : 30;
+    return Date.now() - days * 86400 * 1000;
+  }, [timeRange]);
+
   const filtered = useMemo(() => {
-    const cutoff = (() => {
-      const days = timeRange === "24h" ? 1 : timeRange === "7d" ? 7 : timeRange === "30d" ? 30 : 36500;
-      return Date.now() - days * 86400 * 1000;
-    })();
     return ALL.filter((c) => {
       // Match if conflict type OR any incident type is selected
       const typeMatch = types.has(c.type) || c.recent.some((r) => types.has(r.type));
       if (!typeMatch) return false;
       if (severityMeta[c.severity].rank < severityMeta[minSeverity].rank) return false;
-      const recentEnough = c.recent.some((r) => +new Date(r.timestamp) >= cutoff) || +new Date(c.startedAt) >= cutoff || timeRange === "all" || c.incidents24h > 0;
-      return recentEnough;
+      if (timeRange === "all") return true;
+      // Strict: must have an incident within the window, or have started within it
+      const hasRecent = c.recent.some((r) => +new Date(r.timestamp) >= cutoff);
+      const startedInWindow = +new Date(c.startedAt) >= cutoff;
+      return hasRecent || startedInWindow;
     });
-  }, [types, minSeverity, timeRange]);
+  }, [types, minSeverity, timeRange, cutoff]);
 
   const selected = filtered.find((c) => c.id === selectedId) ?? ALL.find((c) => c.id === selectedId) ?? null;
   const totalIncidents = filtered.reduce((s, c) => s + c.incidents24h, 0);
@@ -50,7 +55,7 @@ const Index = () => {
 
   return (
     <main className="relative h-screen w-screen overflow-hidden bg-background">
-      <ConflictMap conflicts={filtered} activeTypes={types} selectedId={selectedId} onSelect={handleSelect} />
+      <ConflictMap conflicts={filtered} activeTypes={types} incidentCutoff={cutoff} selectedId={selectedId} onSelect={handleSelect} />
 
       <TopBar activeCount={activeCount} totalIncidents={totalIncidents} />
       <Legend />
