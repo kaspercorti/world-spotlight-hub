@@ -1,5 +1,4 @@
-import { severityMeta } from "@/lib/conflict-utils";
-import type { Severity } from "@/data/conflicts";
+import { severityMeta, type Severity } from "@/lib/incidents";
 
 const ORDER: Severity[] = ["low", "tension", "active", "war"];
 
