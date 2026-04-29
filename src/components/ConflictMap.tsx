@@ -36,6 +36,26 @@ function FlyTo({ conflict }: { conflict: Conflict | null }) {
   return null;
 }
 
+function InvalidateOnResize() {
+  const map = useMap();
+  useEffect(() => {
+    const invalidate = () => map.invalidateSize();
+    // Multiple passes to catch late layout shifts (fonts, panels, mobile UI)
+    const timers = [50, 200, 500, 1000].map((d) => window.setTimeout(invalidate, d));
+    window.addEventListener("resize", invalidate);
+    window.addEventListener("orientationchange", invalidate);
+    const ro = new ResizeObserver(invalidate);
+    ro.observe(map.getContainer());
+    return () => {
+      timers.forEach(clearTimeout);
+      window.removeEventListener("resize", invalidate);
+      window.removeEventListener("orientationchange", invalidate);
+      ro.disconnect();
+    };
+  }, [map]);
+  return null;
+}
+
 export function ConflictMap({ conflicts, selectedId, onSelect }: Props) {
   const selected = conflicts.find((c) => c.id === selectedId) ?? null;
 
@@ -69,6 +89,7 @@ export function ConflictMap({ conflicts, selectedId, onSelect }: Props) {
           />
         ))}
         <FlyTo conflict={selected} />
+        <InvalidateOnResize />
       </MapContainer>
       {/* Subtle radial overlay for depth */}
       <div className="pointer-events-none absolute inset-0 bg-gradient-radar" />
