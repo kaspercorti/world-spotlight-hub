@@ -433,7 +433,7 @@ async function processDocApi(supabase: any): Promise<number> {
   }
 
   if (rows.length === 0) return 0;
-  const { error } = await supabase.from("incidents").upsert(rows, { onConflict: "external_id", ignoreDuplicates: true });
+  const { error } = await supabase.from("incidents").upsert(rows, { onConflict: "content_hash", ignoreDuplicates: true });
   if (error) { console.error("Doc insert failed:", error); return 0; }
   return rows.length;
 }
@@ -455,7 +455,7 @@ async function processEvents(supabase: any): Promise<number> {
   let inserted = 0;
   for (let i = 0; i < fresh.length; i += 200) {
     const batch = fresh.slice(i, i + 200);
-    const { error } = await supabase.from("incidents").upsert(batch, { onConflict: "external_id", ignoreDuplicates: true });
+    const { error } = await supabase.from("incidents").upsert(batch, { onConflict: "content_hash", ignoreDuplicates: true });
     if (error) { console.error("Events insert failed:", error); break; }
     inserted += batch.length;
   }
