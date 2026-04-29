@@ -7,7 +7,7 @@ import { severityMeta } from "@/lib/conflict-utils";
 interface Props {
   conflicts: Conflict[];
   selectedId: string | null;
-  onSelect: (id: string) => void;
+  onSelect: (id: string, incidentId?: string) => void;
 }
 
 // SVG glyph per conflict type
