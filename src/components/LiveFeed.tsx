@@ -9,7 +9,7 @@ interface Props {
 }
 
 export function LiveFeed({ onSelect }: Props) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(() => typeof window !== "undefined" && window.innerWidth >= 768);
   const [sort, setSort] = useState<"recent" | "severe">("recent");
 
   const items = [...allIncidents].sort((a, b) => {
@@ -20,22 +20,23 @@ export function LiveFeed({ onSelect }: Props) {
   return (
     <aside
       className={cn(
-        "pointer-events-auto absolute left-0 top-0 z-[1000] flex h-full flex-col border-r border-border bg-gradient-panel backdrop-blur-xl transition-[width] duration-300",
-        open ? "w-[320px]" : "w-[44px]"
+        "pointer-events-auto absolute left-0 top-0 z-[1000] flex h-full flex-col transition-[width] duration-300",
+        open
+          ? "w-[320px] border-r border-border bg-gradient-panel backdrop-blur-xl"
+          : "w-0 border-r-0 bg-transparent"
       )}
     >
       <button
         onClick={() => setOpen((v) => !v)}
-        className="absolute -right-3 top-20 z-10 grid h-6 w-6 place-items-center rounded-full border border-border bg-card text-muted-foreground hover:text-foreground"
+        className={cn(
+          "absolute top-20 z-10 grid h-7 w-7 place-items-center rounded-full border border-border bg-card/90 backdrop-blur-md text-muted-foreground hover:text-foreground shadow-panel",
+          open ? "-right-3.5" : "left-3"
+        )}
       >
-        {open ? <ChevronLeft className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+        {open ? <ChevronLeft className="h-3.5 w-3.5" /> : <Activity className="h-3.5 w-3.5 text-risk-active" />}
       </button>
 
-      {!open ? (
-        <div className="flex h-full items-start justify-center pt-20">
-          <Activity className="h-4 w-4 text-muted-foreground" />
-        </div>
-      ) : (
+      {open && (
         <>
           <div className="border-b border-border p-4 pt-20">
             <div className="mb-3 flex items-center gap-2">
