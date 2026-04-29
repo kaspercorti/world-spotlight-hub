@@ -235,18 +235,61 @@ export function ConflictMap({ conflicts, selectedId, activeTypes, onSelect }: Pr
             eventHandlers={{ click: () => onSelect(c.id) }}
           />
         ))}
-        {/* Per-incident markers — only those matching selected types */}
-        {incidentMarkers.filter((m) => typeAllowed(m.type)).map((m) => (
-          <Marker
-            key={m.key}
-            position={[m.lat, m.lng]}
-            icon={makeIcon(m.type, m.severity, { small: true, offsetX: m.offsetX, offsetY: m.offsetY })}
-            title={m.title}
-            eventHandlers={{ click: () => onSelect(m.conflictId, m.incidentId) }}
-          />
-        ))}
+        {/* Per-incident markers — clustered when zoomed out (worst icon + N badge), fanned out when zoomed in */}
+        {(() => {
+          const visible = incidentMarkers.filter((m) => typeAllowed(m.type));
+          // Group by location
+          const groups = new Map<string, typeof visible>();
+          for (const m of visible) {
+            const k = `${m.lat.toFixed(2)}_${m.lng.toFixed(2)}`;
+            const arr = groups.get(k) ?? [];
+            arr.push(m);
+            groups.set(k, arr);
+          }
+          const out: JSX.Element[] = [];
+          for (const group of groups.values()) {
+            if (group.length === 1 || fannedOut) {
+              for (const m of group) {
+                out.push(
+                  <Marker
+                    key={m.key}
+                    position={[m.lat, m.lng]}
+                    icon={makeIcon(m.type, m.severity, {
+                      small: true,
+                      offsetX: fannedOut ? m.offsetX : 0,
+                      offsetY: fannedOut ? m.offsetY : 0,
+                    })}
+                    title={m.title}
+                    eventHandlers={{ click: () => onSelect(m.conflictId, m.incidentId) }}
+                  />
+                );
+              }
+            } else {
+              // Pick the "worst" incident in the group
+              const worst = [...group].sort((a, b) => {
+                const s = SEV_RANK[b.severity] - SEV_RANK[a.severity];
+                if (s !== 0) return s;
+                return TYPE_RANK[b.type] - TYPE_RANK[a.type];
+              })[0];
+              out.push(
+                <Marker
+                  key={`cluster-${worst.key}`}
+                  position={[worst.lat, worst.lng]}
+                  icon={makeIcon(worst.type, worst.severity, {
+                    small: true,
+                    extraCount: group.length - 1,
+                  })}
+                  title={`${worst.title} (+${group.length - 1} more — zoom in)`}
+                  eventHandlers={{ click: () => onSelect(worst.conflictId, worst.incidentId) }}
+                />
+              );
+            }
+          }
+          return out;
+        })()}
         <FlyTo conflict={selected} />
         <InvalidateOnResize />
+        <ZoomTracker onZoom={setZoom} />
       </MapContainer>
       <div className="pointer-events-none absolute inset-0 bg-gradient-radar" />
     </div>
