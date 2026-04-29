@@ -14,7 +14,57 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      incidents: {
+        Row: {
+          country: string | null
+          created_at: string
+          external_id: string
+          id: string
+          lat: number
+          lng: number
+          location: string | null
+          occurred_at: string
+          severity: string
+          source: string | null
+          source_url: string | null
+          summary: string | null
+          title: string
+          type: string
+        }
+        Insert: {
+          country?: string | null
+          created_at?: string
+          external_id: string
+          id?: string
+          lat: number
+          lng: number
+          location?: string | null
+          occurred_at: string
+          severity?: string
+          source?: string | null
+          source_url?: string | null
+          summary?: string | null
+          title: string
+          type: string
+        }
+        Update: {
+          country?: string | null
+          created_at?: string
+          external_id?: string
+          id?: string
+          lat?: number
+          lng?: number
+          location?: string | null
+          occurred_at?: string
+          severity?: string
+          source?: string | null
+          source_url?: string | null
+          summary?: string | null
+          title?: string
+          type?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
