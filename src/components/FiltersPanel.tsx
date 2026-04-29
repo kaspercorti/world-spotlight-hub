@@ -23,7 +23,7 @@ const TIME: { key: TimeRange; label: string }[] = [
 ];
 
 const SEV: Severity[] = ["low", "tension", "active", "war"];
-const TYPES: ConflictType[] = ["war", "protest", "terror", "civil", "cyber"];
+const TYPES: ConflictType[] = ["war", "airstrike", "explosion", "shooting", "terror", "protest", "civil", "robbery", "kidnapping", "arson", "cyber"];
 
 export function FiltersPanel(props: Props) {
   const [openMobile, setOpenMobile] = useState(false);
