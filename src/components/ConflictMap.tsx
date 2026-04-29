@@ -213,9 +213,10 @@ function SpreadMarkers({
   );
 }
 
-export function ConflictMap({ conflicts, selectedId, activeTypes, onSelect }: Props) {
+export function ConflictMap({ conflicts, selectedId, activeTypes, incidentCutoff, onSelect }: Props) {
   const selected = conflicts.find((c) => c.id === selectedId) ?? null;
   const typeAllowed = (t: ConflictType) => !activeTypes || activeTypes.has(t);
+  const withinWindow = (ts: string) => !incidentCutoff || +new Date(ts) >= incidentCutoff;
 
   // Build a unified marker list (hubs + incidents) that the spreader can lay out.
   const allMarkers = useMemo<RawMarker[]>(() => {
