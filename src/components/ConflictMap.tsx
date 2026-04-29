@@ -51,12 +51,18 @@ const typeLabel: Record<ConflictType, string> = {
   airstrike: "Flyganfall",
 };
 
-function makeIcon(type: ConflictType, severity: Severity, opts?: { small?: boolean }) {
+function makeIcon(
+  type: ConflictType,
+  severity: Severity,
+  opts?: { small?: boolean; offsetX?: number; offsetY?: number }
+) {
   const color = severityMeta[severity].color;
   const intense = severity === "war" || severity === "active";
   const glyph = typeGlyph[type];
   const base = opts?.small ? 24 : intense ? 36 : 30;
   const size = base;
+  const ox = opts?.offsetX ?? 0;
+  const oy = opts?.offsetY ?? 0;
 
   const html = `
     <div class="conflict-marker" style="width:${size}px;height:${size}px;position:relative;">
@@ -78,7 +84,8 @@ function makeIcon(type: ConflictType, severity: Severity, opts?: { small?: boole
     html,
     className: "",
     iconSize: [size, size],
-    iconAnchor: [size / 2, size / 2],
+    // iconAnchor controls where the marker "points" — shift it to spread overlapping markers
+    iconAnchor: [size / 2 - ox, size / 2 - oy],
   });
 }
 
@@ -115,9 +122,9 @@ export function ConflictMap({ conflicts, selectedId, activeTypes, onSelect }: Pr
   const selected = conflicts.find((c) => c.id === selectedId) ?? null;
   const typeAllowed = (t: ConflictType) => !activeTypes || activeTypes.has(t);
 
-  // Build per-incident markers (deterministic small offset for those without explicit coords)
+  // Build per-incident markers, then spread overlapping ones in a small pixel-ring
   const incidentMarkers = useMemo(() => {
-    const items: { key: string; incidentId: string; lat: number; lng: number; type: ConflictType; severity: Severity; conflictId: string; title: string }[] = [];
+    const items: { key: string; incidentId: string; lat: number; lng: number; type: ConflictType; severity: Severity; conflictId: string; title: string; offsetX: number; offsetY: number }[] = [];
     for (const c of conflicts) {
       for (let i = 0; i < c.recent.length; i++) {
         const ev = c.recent[i];
@@ -138,8 +145,28 @@ export function ConflictMap({ conflicts, selectedId, activeTypes, onSelect }: Pr
           severity: c.severity,
           conflictId: c.id,
           title: `${ev.title} — ${typeLabel[ev.type]}`,
+          offsetX: 0,
+          offsetY: 0,
         });
       }
+    }
+
+    // Group by rounded coordinate (~1km bucket) and fan out members in a ring of pixel offsets
+    const buckets = new Map<string, typeof items>();
+    for (const it of items) {
+      const key = `${it.lat.toFixed(2)}_${it.lng.toFixed(2)}`;
+      const arr = buckets.get(key) ?? [];
+      arr.push(it);
+      buckets.set(key, arr);
+    }
+    for (const group of buckets.values()) {
+      if (group.length <= 1) continue;
+      const radius = 18 + group.length * 2; // px
+      group.forEach((it, idx) => {
+        const a = (idx / group.length) * Math.PI * 2 - Math.PI / 2;
+        it.offsetX = Math.cos(a) * radius;
+        it.offsetY = Math.sin(a) * radius;
+      });
     }
     return items;
   }, [conflicts]);
@@ -178,7 +205,7 @@ export function ConflictMap({ conflicts, selectedId, activeTypes, onSelect }: Pr
           <Marker
             key={m.key}
             position={[m.lat, m.lng]}
-            icon={makeIcon(m.type, m.severity, { small: true })}
+            icon={makeIcon(m.type, m.severity, { small: true, offsetX: m.offsetX, offsetY: m.offsetY })}
             title={m.title}
             eventHandlers={{ click: () => onSelect(m.conflictId, m.incidentId) }}
           />
