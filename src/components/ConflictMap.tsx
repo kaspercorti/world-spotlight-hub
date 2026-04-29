@@ -51,12 +51,18 @@ const typeLabel: Record<ConflictType, string> = {
   airstrike: "Flyganfall",
 };
 
-function makeIcon(type: ConflictType, severity: Severity, opts?: { small?: boolean }) {
+function makeIcon(
+  type: ConflictType,
+  severity: Severity,
+  opts?: { small?: boolean; offsetX?: number; offsetY?: number }
+) {
   const color = severityMeta[severity].color;
   const intense = severity === "war" || severity === "active";
   const glyph = typeGlyph[type];
   const base = opts?.small ? 24 : intense ? 36 : 30;
   const size = base;
+  const ox = opts?.offsetX ?? 0;
+  const oy = opts?.offsetY ?? 0;
 
   const html = `
     <div class="conflict-marker" style="width:${size}px;height:${size}px;position:relative;">
@@ -78,7 +84,8 @@ function makeIcon(type: ConflictType, severity: Severity, opts?: { small?: boole
     html,
     className: "",
     iconSize: [size, size],
-    iconAnchor: [size / 2, size / 2],
+    // iconAnchor controls where the marker "points" — shift it to spread overlapping markers
+    iconAnchor: [size / 2 - ox, size / 2 - oy],
   });
 }
 
