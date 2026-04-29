@@ -40,7 +40,7 @@ interface NormalizedIncident {
 // Doc API: https://api.gdeltproject.org/api/v2/doc/doc
 // We use ArtList output with geo info. Query targets violent / civil-unrest events.
 async function fetchGdelt(): Promise<any[]> {
-  // GDELT Doc API requires short queries. We fetch multiple narrow queries and merge.
+  // Run GDELT queries in parallel to fit within edge function time budget.
   const queries = [
     '(shooting OR bombing OR explosion)',
     '(airstrike OR "air strike" OR missile)',
@@ -48,30 +48,25 @@ async function fetchGdelt(): Promise<any[]> {
     '(kidnapping OR hostage OR abduction)',
     '(arson OR "set on fire")',
   ];
-  const all: any[] = [];
-  for (const q of queries) {
-    const url = `https://api.gdeltproject.org/api/v2/doc/doc?query=${encodeURIComponent(q + ' sourcelang:eng')}&mode=ArtList&format=json&maxrecords=25&sort=DateDesc&timespan=24H`;
+  const results = await Promise.all(queries.map(async (q) => {
+    const url = `https://api.gdeltproject.org/api/v2/doc/doc?query=${encodeURIComponent(q + ' sourcelang:eng')}&mode=ArtList&format=json&maxrecords=20&sort=DateDesc&timespan=24H`;
     try {
       const res = await fetch(url, { headers: { "User-Agent": "lovable-conflict-map/1.0" } });
-      if (!res.ok) {
-        console.error("GDELT fetch failed", q, res.status);
-        await new Promise((r) => setTimeout(r, 2000));
-        continue;
-      }
+      if (!res.ok) { console.error("GDELT fetch failed", q, res.status); return []; }
       const text = await res.text();
       try {
         const data = JSON.parse(text);
-        if (data.articles) all.push(...data.articles);
+        return data.articles ?? [];
       } catch {
         console.error("GDELT non-JSON for query", q, ":", text.slice(0, 120));
+        return [];
       }
     } catch (e) {
       console.error("GDELT request error", q, e);
+      return [];
     }
-    // Throttle to avoid 429
-    await new Promise((r) => setTimeout(r, 1500));
-  }
-  // Dedup by url
+  }));
+  const all = results.flat();
   const seen = new Set<string>();
   return all.filter((a) => {
     if (!a.url || seen.has(a.url)) return false;
