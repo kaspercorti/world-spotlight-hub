@@ -205,7 +205,7 @@ export function ConflictMap({ conflicts, selectedId, activeTypes, onSelect }: Pr
           <Marker
             key={m.key}
             position={[m.lat, m.lng]}
-            icon={makeIcon(m.type, m.severity, { small: true })}
+            icon={makeIcon(m.type, m.severity, { small: true, offsetX: m.offsetX, offsetY: m.offsetY })}
             title={m.title}
             eventHandlers={{ click: () => onSelect(m.conflictId, m.incidentId) }}
           />
