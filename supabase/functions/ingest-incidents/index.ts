@@ -34,6 +34,25 @@ interface NormalizedIncident {
   source: string | null;
   source_url: string | null;
   occurred_at: string;
+  content_hash: string;
+}
+
+// Deterministic fingerprint to collapse duplicates of the same event reported
+// by many outlets. Combines normalized title + ~10km grid (1 decimal lat/lng).
+async function makeContentHash(title: string, lat: number, lng: number): Promise<string> {
+  const normTitle = (title || "").toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const key = `${normTitle}:${lat.toFixed(1)}:${lng.toFixed(1)}`;
+  const buf = new TextEncoder().encode(key);
+  const hashBuf = await crypto.subtle.digest("SHA-1", buf);
+  return Array.from(new Uint8Array(hashBuf)).map((b) => b.toString(16).padStart(2, "0")).join("").slice(0, 32);
+}
+
+// Extract a stable article ID from GDELT article URLs (e.g. ".../news/national/26064793.foo-bar/")
+// so the same article syndicated to many local sites collapses into one row.
+function gdeltArticleKey(url: string): string {
+  const m = url.match(/(\d{7,})/);
+  if (m) return `art-${m[1]}`;
+  return url;
 }
 
 // =====================================================================
