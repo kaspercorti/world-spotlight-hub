@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { MapContainer, TileLayer, Marker, useMap } from "react-leaflet";
 import L from "leaflet";
 import type { Conflict, ConflictType, Severity } from "@/data/conflicts";
@@ -54,7 +54,7 @@ const typeLabel: Record<ConflictType, string> = {
 function makeIcon(
   type: ConflictType,
   severity: Severity,
-  opts?: { small?: boolean; offsetX?: number; offsetY?: number }
+  opts?: { small?: boolean; offsetX?: number; offsetY?: number; extraCount?: number }
 ) {
   const color = severityMeta[severity].color;
   const intense = severity === "war" || severity === "active";
@@ -63,6 +63,17 @@ function makeIcon(
   const size = base;
   const ox = opts?.offsetX ?? 0;
   const oy = opts?.offsetY ?? 0;
+  const extra = opts?.extraCount ?? 0;
+
+  const badge = extra > 0 ? `
+    <div style="
+      position:absolute; top:-6px; right:-6px;
+      min-width:18px; height:18px; padding:0 5px;
+      background:hsl(0 0% 100%); color:hsl(220 25% 8%);
+      border-radius:9px; font:600 10px/18px ui-sans-serif,system-ui,sans-serif;
+      text-align:center; box-shadow:0 0 0 2px rgba(0,0,0,0.6), 0 0 8px ${color};
+      pointer-events:none;
+    ">+${extra}</div>` : "";
 
   const html = `
     <div class="conflict-marker" style="width:${size}px;height:${size}px;position:relative;">
@@ -79,15 +90,22 @@ function makeIcon(
           ${glyph}
         </svg>
       </div>
+      ${badge}
     </div>`;
   return L.divIcon({
     html,
     className: "",
     iconSize: [size, size],
-    // iconAnchor controls where the marker "points" — shift it to spread overlapping markers
     iconAnchor: [size / 2 - ox, size / 2 - oy],
   });
 }
+
+// Priority for picking which incident represents a cluster (higher = worse)
+const SEV_RANK: Record<Severity, number> = { low: 1, tension: 2, active: 3, war: 4 };
+const TYPE_RANK: Record<ConflictType, number> = {
+  war: 10, airstrike: 9, explosion: 8, terror: 7, shooting: 6,
+  kidnapping: 5, arson: 4, robbery: 3, civil: 2, protest: 1, cyber: 1,
+};
 
 function FlyTo({ conflict }: { conflict: Conflict | null }) {
   const map = useMap();
