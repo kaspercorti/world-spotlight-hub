@@ -112,5 +112,4 @@ export function FiltersPanel(props: Props) {
       </div>
     </>
   );
-  );
 }
