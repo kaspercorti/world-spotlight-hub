@@ -12,9 +12,15 @@ const ALL_TYPES: ConflictType[] = ["war", "protest", "terror", "civil", "cyber"]
 
 const Index = () => {
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedIncidentId, setSelectedIncidentId] = useState<string | null>(null);
   const [types, setTypes] = useState<Set<ConflictType>>(new Set(ALL_TYPES));
   const [minSeverity, setMinSeverity] = useState<Severity>("low");
   const [timeRange, setTimeRange] = useState<TimeRange>("7d");
+
+  const handleSelect = (id: string, incidentId?: string) => {
+    setSelectedId(id);
+    setSelectedIncidentId(incidentId ?? null);
+  };
 
   const filtered = useMemo(() => {
     const cutoff = (() => {
@@ -42,11 +48,11 @@ const Index = () => {
 
   return (
     <main className="relative h-screen w-screen overflow-hidden bg-background">
-      <ConflictMap conflicts={filtered} selectedId={selectedId} onSelect={setSelectedId} />
+      <ConflictMap conflicts={filtered} selectedId={selectedId} onSelect={handleSelect} />
 
       <TopBar activeCount={activeCount} totalIncidents={totalIncidents} />
       <Legend />
-      <LiveFeed onSelect={setSelectedId} />
+      <LiveFeed onSelect={(id) => handleSelect(id)} />
 
       <FiltersPanel
         types={types}
@@ -57,7 +63,16 @@ const Index = () => {
         onTimeRange={setTimeRange}
       />
 
-      {selected && <ConflictDetail conflict={selected} onClose={() => setSelectedId(null)} />}
+      {selected && (
+        <ConflictDetail
+          conflict={selected}
+          highlightIncidentId={selectedIncidentId}
+          onClose={() => {
+            setSelectedId(null);
+            setSelectedIncidentId(null);
+          }}
+        />
+      )}
     </main>
   );
 };

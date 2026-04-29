@@ -3,12 +3,24 @@ import type { Conflict } from "@/data/conflicts";
 import { severityMeta, verificationMeta, typeMeta, timeAgo } from "@/lib/conflict-utils";
 import { cn } from "@/lib/utils";
 
-export function ConflictDetail({ conflict, onClose }: { conflict: Conflict; onClose: () => void }) {
+export function ConflictDetail({
+  conflict,
+  highlightIncidentId,
+  onClose,
+}: {
+  conflict: Conflict;
+  highlightIncidentId?: string | null;
+  onClose: () => void;
+}) {
   const sev = severityMeta[conflict.severity];
+  const focused = highlightIncidentId
+    ? conflict.recent.find((r) => r.id === highlightIncidentId) ?? null
+    : null;
+  const others = focused ? conflict.recent.filter((r) => r.id !== focused.id) : conflict.recent;
 
   return (
     <aside className="pointer-events-auto absolute right-0 top-0 z-[1001] flex h-full w-full max-w-md flex-col border-l border-border bg-gradient-panel backdrop-blur-xl shadow-panel animate-slide-in-right">
-      {/* Header */}
+      {/* Header — when an incident is focused, show IT as the primary subject */}
       <div className="flex items-start justify-between gap-3 border-b border-border p-5">
         <div className="min-w-0">
           <div className="mb-2 flex items-center gap-2">
@@ -17,14 +29,24 @@ export function ConflictDetail({ conflict, onClose }: { conflict: Conflict; onCl
               style={{ boxShadow: `0 0 12px ${sev.color}` }}
             />
             <span className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
-              {sev.label} · risk {conflict.riskLevel}/10
+              {focused ? `${typeMeta[focused.type].label} · ${verificationMeta[focused.verification].label}` : `${sev.label} · risk ${conflict.riskLevel}/10`}
             </span>
           </div>
-          <h2 className="text-xl font-semibold leading-tight">{conflict.name}</h2>
+          <h2 className="text-xl font-semibold leading-tight">
+            {focused ? focused.title : conflict.name}
+          </h2>
           <div className="mt-1.5 flex items-center gap-1.5 text-xs text-muted-foreground">
             <MapPin className="h-3 w-3" />
-            <span>{conflict.country} · {conflict.region}</span>
+            <span>
+              {focused?.location ? `${focused.location} · ` : ""}{conflict.country} · {conflict.region}
+            </span>
           </div>
+          {focused && (
+            <div className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+              <Clock className="h-3 w-3" />
+              <span>{timeAgo(focused.timestamp)} · {focused.source}</span>
+            </div>
+          )}
         </div>
         <button
           onClick={onClose}
@@ -37,14 +59,24 @@ export function ConflictDetail({ conflict, onClose }: { conflict: Conflict; onCl
       {/* Stats */}
       <div className="grid grid-cols-3 gap-px bg-border">
         <Stat label="Incidents 24h" value={conflict.incidents24h.toString()} />
-        <Stat label="Type" value={`${typeMeta[conflict.type].icon} ${typeMeta[conflict.type].label}`} />
+        <Stat
+          label="Type"
+          value={`${typeMeta[focused ? focused.type : conflict.type].icon} ${typeMeta[focused ? focused.type : conflict.type].label}`}
+        />
         <Stat label="Started" value={new Date(conflict.startedAt).getFullYear().toString()} />
       </div>
 
       <div className="flex-1 overflow-y-auto scrollbar-thin">
-        {/* Summary */}
-        <Section title="Summary">
-          <p className="text-sm leading-relaxed text-foreground/90">{conflict.summary}</p>
+        {/* Primary description — the focused incident if any, otherwise the conflict overview */}
+        <Section title={focused ? "Event details" : "Summary"}>
+          <p className="text-sm leading-relaxed text-foreground/90">
+            {focused ? focused.summary : conflict.summary}
+          </p>
+          {focused && (
+            <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
+              Part of <span className="text-foreground/80">{conflict.name}</span> — {conflict.summary}
+            </p>
+          )}
         </Section>
 
         {/* Actors */}
@@ -58,13 +90,13 @@ export function ConflictDetail({ conflict, onClose }: { conflict: Conflict; onCl
           </div>
         </Section>
 
-        {/* Timeline */}
-        <Section title={`Recent events`} icon={<Clock className="h-3 w-3" />}>
-          {conflict.recent.length === 0 ? (
-            <p className="text-xs text-muted-foreground">No recent events recorded.</p>
+        {/* Timeline — other recent events in the same area */}
+        <Section title={focused ? "Other recent events in area" : "Recent events"} icon={<Clock className="h-3 w-3" />}>
+          {others.length === 0 ? (
+            <p className="text-xs text-muted-foreground">No other recent events recorded.</p>
           ) : (
             <ol className="relative space-y-3 border-l border-border pl-4">
-              {conflict.recent.map((ev) => {
+              {others.map((ev) => {
                 const v = verificationMeta[ev.verification];
                 return (
                   <li key={ev.id} className="relative">
