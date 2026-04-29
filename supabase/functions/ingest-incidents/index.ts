@@ -73,23 +73,6 @@ async function fetchGdelt(): Promise<any[]> {
   });
 }
 
-  const res = await fetch(url, {
-    headers: { "User-Agent": "lovable-conflict-map/1.0" },
-  });
-  if (!res.ok) {
-    console.error("GDELT fetch failed", res.status, await res.text());
-    return [];
-  }
-  // GDELT sometimes returns text/html on error — guard.
-  const text = await res.text();
-  try {
-    const data = JSON.parse(text);
-    return data.articles ?? [];
-  } catch {
-    console.error("GDELT non-JSON response:", text.slice(0, 200));
-    return [];
-  }
-}
 
 // Parse GDELT seendate ("YYYYMMDDTHHMMSSZ") to ISO
 function parseSeenDate(s: string): string | null {
