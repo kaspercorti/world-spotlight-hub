@@ -96,7 +96,10 @@ async function classifyBatch(items: { id: string; title: string; snippet: string
     "You classify real-world incident headlines into a strict taxonomy. Return only valid tool calls. " +
     "Allowed types: war, airstrike, explosion, shooting, terror, protest, civil, robbery, kidnapping, arson, cyber. " +
     "Severity scale: low, tension, active, war. Use 'war' only for active armed conflict. " +
-    "Reject items that are not actual incidents (opinion pieces, history, anniversaries, sports, entertainment) by setting type to null.";
+    "Reject items that are not actual incidents (opinion pieces, history, anniversaries, retrospectives, sports, entertainment) by setting type to null. " +
+    "CRITICAL: 'event_country' MUST be the country where the incident PHYSICALLY OCCURRED (extracted from the headline), NOT the country of the news outlet. " +
+    "Use the official English country name matching this list exactly when applicable: United States, Mexico, Canada, United Kingdom, France, Germany, Sweden, Norway, Denmark, Finland, Russia, Ukraine, Poland, Israel, Palestine, Lebanon, Syria, Iraq, Iran, Yemen, Saudi Arabia, Egypt, Turkey, Sudan, South Sudan, Ethiopia, Somalia, Kenya, Nigeria, Mali, Burkina Faso, Niger, Libya, DR Congo, Congo, Cameroon, South Africa, Mozambique, India, Pakistan, Afghanistan, Bangladesh, Sri Lanka, Nepal, China, Japan, South Korea, North Korea, Taiwan, Philippines, Indonesia, Thailand, Vietnam, Myanmar, Malaysia, Australia, New Zealand, Brazil, Argentina, Colombia, Venezuela, Peru, Chile, Ecuador, Bolivia, Haiti, Italy, Spain, Greece, Belgium, Netherlands, Switzerland, Austria, Czech Republic, Hungary, Romania, Bulgaria, Serbia, Bosnia and Herzegovina, Kosovo. " +
+    "If the headline does not clearly identify a country of occurrence, set event_country to null and the item will be discarded.";
 
   const user = JSON.stringify(items);
 
@@ -135,9 +138,10 @@ async function classifyBatch(items: { id: string; title: string; snippet: string
                       enum: ["low", "tension", "active", "war"],
                     },
                     short_summary: { type: "string" },
-                    location: { type: ["string", "null"] },
+                    location: { type: ["string", "null"], description: "City or specific place where the incident occurred" },
+                    event_country: { type: ["string", "null"], description: "Country where the incident physically occurred (NOT the news outlet's country)" },
                   },
-                  required: ["id", "type", "severity", "short_summary"],
+                  required: ["id", "type", "severity", "short_summary", "event_country"],
                   additionalProperties: false,
                 },
               },
@@ -258,8 +262,11 @@ Deno.serve(async (req) => {
       if (!cls || !cls.type) continue;
       if (!ALLOWED_TYPES.includes(cls.type)) continue;
 
-      const centroid = c.country ? country_centroids[c.country] : undefined;
-      if (!centroid) continue; // skip if we cannot geolocate
+      // Use the EVENT country (where the incident actually happened), not the news outlet's country.
+      const eventCountry: string | null = cls.event_country ?? null;
+      if (!eventCountry) continue;
+      const centroid = country_centroids[eventCountry];
+      if (!centroid) continue; // skip if we cannot geolocate the event country
       // Add small jitter so multiple incidents in same country don't all sit on identical point
       const jitter = () => (Math.random() - 0.5) * 1.5;
       const lat = centroid[0] + jitter();
@@ -275,8 +282,8 @@ Deno.serve(async (req) => {
         severity: cls.severity ?? "tension",
         lat,
         lng,
-        location: cls.location ?? c.country ?? null,
-        country: c.country ?? null,
+        location: cls.location ?? eventCountry,
+        country: eventCountry,
         source: c.domain ?? "GDELT",
         source_url: c.url ?? null,
         occurred_at: occurred,
