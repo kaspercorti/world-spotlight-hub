@@ -141,7 +141,7 @@ function SpreadMarkers({
 
   const positioned = useMemo(() => {
     // Pixel threshold for "same place" — bigger when zoomed out
-    const threshold = 38;
+    const threshold = 26;
     type P = RawMarker & { px: number; py: number };
     const pts: P[] = markers.map((m) => {
       const p = map.project([m.lat, m.lng], zoom);
@@ -177,7 +177,10 @@ function SpreadMarkers({
       // Center of the cluster in pixel space
       const cx = cluster.reduce((s, p) => s + p.px, 0) / cluster.length;
       const cy = cluster.reduce((s, p) => s + p.py, 0) / cluster.length;
-      const radius = Math.max(threshold * 0.75, cluster.length * 8);
+      // Tight ring: just enough to separate icons (~22-26px in size)
+      const iconSize = 26;
+      const circumference = cluster.length * (iconSize + 2);
+      const radius = Math.min(28, Math.max(iconSize * 0.7, circumference / (2 * Math.PI)));
       // Stable sort: hubs first, then by id so order is deterministic
       const sorted = [...cluster].sort((a, b) => {
         if (a.isHub !== b.isHub) return a.isHub ? -1 : 1;
