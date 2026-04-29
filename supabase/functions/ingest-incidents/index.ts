@@ -40,10 +40,38 @@ interface NormalizedIncident {
 // Doc API: https://api.gdeltproject.org/api/v2/doc/doc
 // We use ArtList output with geo info. Query targets violent / civil-unrest events.
 async function fetchGdelt(): Promise<any[]> {
-  const query = encodeURIComponent(
-    '(sourcelang:eng) AND (theme:KILL OR theme:TERROR OR theme:PROTEST OR theme:ARMEDCONFLICT OR theme:UNREST_BOMBING OR theme:UNREST_CLOSE_SHOOTING OR theme:UNREST_HOSTAGE OR "shooting" OR "explosion" OR "airstrike" OR "kidnapping" OR "arson" OR "riot" OR "bombing")'
-  );
-  const url = `https://api.gdeltproject.org/api/v2/doc/doc?query=${query}&mode=ArtList&format=json&maxrecords=75&sort=DateDesc&timespan=24H`;
+  // GDELT Doc API requires short queries. We fetch multiple narrow queries and merge.
+  const queries = [
+    '(shooting OR bombing OR explosion)',
+    '(airstrike OR "air strike" OR missile)',
+    '(protest OR riot OR unrest)',
+    '(kidnapping OR hostage OR abduction)',
+    '(arson OR "set on fire")',
+  ];
+  const all: any[] = [];
+  for (const q of queries) {
+    const url = `https://api.gdeltproject.org/api/v2/doc/doc?query=${encodeURIComponent(q + ' sourcelang:eng')}&mode=ArtList&format=json&maxrecords=25&sort=DateDesc&timespan=24H`;
+    const res = await fetch(url, { headers: { "User-Agent": "lovable-conflict-map/1.0" } });
+    if (!res.ok) {
+      console.error("GDELT fetch failed", q, res.status);
+      continue;
+    }
+    const text = await res.text();
+    try {
+      const data = JSON.parse(text);
+      if (data.articles) all.push(...data.articles);
+    } catch {
+      console.error("GDELT non-JSON for query", q, ":", text.slice(0, 120));
+    }
+  }
+  // Dedup by url
+  const seen = new Set<string>();
+  return all.filter((a) => {
+    if (!a.url || seen.has(a.url)) return false;
+    seen.add(a.url);
+    return true;
+  });
+}
 
   const res = await fetch(url, {
     headers: { "User-Agent": "lovable-conflict-map/1.0" },
