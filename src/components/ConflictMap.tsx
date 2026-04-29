@@ -111,8 +111,9 @@ function InvalidateOnResize() {
   return null;
 }
 
-export function ConflictMap({ conflicts, selectedId, onSelect }: Props) {
+export function ConflictMap({ conflicts, selectedId, activeTypes, onSelect }: Props) {
   const selected = conflicts.find((c) => c.id === selectedId) ?? null;
+  const typeAllowed = (t: ConflictType) => !activeTypes || activeTypes.has(t);
 
   // Build per-incident markers (deterministic small offset for those without explicit coords)
   const incidentMarkers = useMemo(() => {
@@ -162,8 +163,8 @@ export function ConflictMap({ conflicts, selectedId, onSelect }: Props) {
           subdomains={["a", "b", "c", "d"]}
           maxZoom={19}
         />
-        {/* Conflict hub markers */}
-        {conflicts.map((c) => (
+        {/* Conflict hub markers — only when the conflict's own type matches a selected filter */}
+        {conflicts.filter((c) => typeAllowed(c.type)).map((c) => (
           <Marker
             key={c.id}
             position={[c.lat, c.lng]}
@@ -172,8 +173,8 @@ export function ConflictMap({ conflicts, selectedId, onSelect }: Props) {
             eventHandlers={{ click: () => onSelect(c.id) }}
           />
         ))}
-        {/* Per-incident markers (smaller, exact location, type-specific icon) */}
-        {incidentMarkers.map((m) => (
+        {/* Per-incident markers — only those matching selected types */}
+        {incidentMarkers.filter((m) => typeAllowed(m.type)).map((m) => (
           <Marker
             key={m.key}
             position={[m.lat, m.lng]}
