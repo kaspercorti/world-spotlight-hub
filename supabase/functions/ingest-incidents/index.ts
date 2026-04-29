@@ -184,24 +184,20 @@ async function fetchGdeltEvents(): Promise<NormalizedIncident[]> {
       }
       const country = cols[53] || null; // FIPS country code
 
-      // Title: derive from source URL slug if available, else generic
-      let title = `${cls.type[0].toUpperCase() + cls.type.slice(1)} reported in ${fullName}`;
-      if (sourceUrl) {
-        try {
-          const u = new URL(sourceUrl);
-          const slug = u.pathname.split("/").filter(Boolean).pop() ?? "";
-          const cleaned = decodeURIComponent(slug)
-            .replace(/[-_]+/g, " ")
-            .replace(/\.(html?|php|aspx?)$/i, "")
-            .trim();
-          if (cleaned.length > 8) title = cleaned.slice(0, 200);
-        } catch { /* keep default */ }
-      }
+      // Title: human-readable label per type + location. URL slugs were misleading
+      // (one article triggers many CAMEO events with different types).
+      const TYPE_LABELS: Record<IncidentType, string> = {
+        war: "Armed conflict", airstrike: "Airstrike", explosion: "Bombing/explosion",
+        shooting: "Armed assault", terror: "Mass violence / terror", protest: "Violent protest",
+        civil: "Civil unrest", robbery: "Robbery", kidnapping: "Abduction",
+        arson: "Arson", cyber: "Cyber attack",
+      };
+      const title = `${TYPE_LABELS[cls.type]} — ${fullName}`;
 
       out.push({
         external_id: `gdelt-evt-${eventId}`,
-        title: title.charAt(0).toUpperCase() + title.slice(1),
-        summary: `${fullName} — CAMEO ${eventCode}`,
+        title: title.slice(0, 200),
+        summary: `Reported event near ${fullName}. Auto-classified from GDELT (CAMEO ${eventCode}).`,
         type: cls.type,
         severity: cls.severity,
         lat,
