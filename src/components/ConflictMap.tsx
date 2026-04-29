@@ -50,15 +50,16 @@ const typeLabel: Record<ConflictType, string> = {
   airstrike: "Flyganfall",
 };
 
-function makeIcon(conflict: Conflict) {
-  const color = severityMeta[conflict.severity].color;
-  const intense = conflict.severity === "war" || conflict.severity === "active";
-  const glyph = typeGlyph[conflict.type];
-  const size = intense ? 36 : 30;
+function makeIcon(type: ConflictType, severity: Severity, opts?: { small?: boolean }) {
+  const color = severityMeta[severity].color;
+  const intense = severity === "war" || severity === "active";
+  const glyph = typeGlyph[type];
+  const base = opts?.small ? 24 : intense ? 36 : 30;
+  const size = base;
 
   const html = `
     <div class="conflict-marker" style="width:${size}px;height:${size}px;position:relative;">
-      ${intense ? `<div class="pulse" style="background:${color};opacity:.45;width:100%;height:100%;border-radius:50%;position:absolute;inset:0;"></div>` : ""}
+      ${intense && !opts?.small ? `<div class="pulse" style="background:${color};opacity:.45;width:100%;height:100%;border-radius:50%;position:absolute;inset:0;"></div>` : ""}
       <div style="
         position:absolute;inset:0;
         background:${color};
