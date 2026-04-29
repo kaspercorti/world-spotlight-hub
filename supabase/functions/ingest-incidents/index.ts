@@ -113,10 +113,9 @@ function cameoToType(eventCode: string): { type: IncidentType; severity: Severit
   const c = eventCode;
   // 145* = riot / violent demonstration
   if (c.startsWith("145")) return { type: "protest", severity: "active" };
-  // 173* = arrest / detain (often violent context)
-  if (c.startsWith("173")) return { type: "kidnapping", severity: "active" };
+  // NOTE: 173* (arrest/detain) deliberately EXCLUDED — too noisy (every drink-driving arrest matched).
   // 175 = use tactics of violent repression
-  if (c === "175" || c.startsWith("175")) return { type: "shooting", severity: "active" };
+  if (c.startsWith("175")) return { type: "shooting", severity: "active" };
   // 18* ASSAULT (physical)
   if (c === "180" || c === "181" || c.startsWith("181")) return { type: "shooting", severity: "active" };
   if (c === "182" || c.startsWith("182")) return { type: "kidnapping", severity: "active" };
