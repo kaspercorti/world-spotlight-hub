@@ -503,9 +503,19 @@ async function processEvents(supabase: any): Promise<number> {
   let inserted = 0;
   for (let i = 0; i < fresh.length; i += 200) {
     const batch = fresh.slice(i, i + 200);
-    const { error } = await supabase.from("incidents").upsert(batch, { onConflict: "content_hash", ignoreDuplicates: true });
+    const { error, data: upserted } = await supabase.from("incidents").upsert(batch, { onConflict: "content_hash", ignoreDuplicates: false }).select("id, source, source_url");
     if (error) { console.error("Events insert failed:", error); break; }
     inserted += batch.length;
+    // Store sources
+    if (upserted && upserted.length > 0) {
+      const sources = upserted.filter((r: any) => r.source_url).map((r: any) => ({
+        incident_id: r.id, source_name: r.source, source_url: r.source_url,
+      }));
+      if (sources.length > 0) {
+        const { error: srcErr } = await supabase.from("incident_sources").upsert(sources, { onConflict: "incident_id,source_url", ignoreDuplicates: true });
+        if (srcErr) console.error("Events source insert failed:", srcErr);
+      }
+    }
   }
   return inserted;
 }
