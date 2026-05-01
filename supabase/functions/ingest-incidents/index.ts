@@ -313,8 +313,10 @@ async function classifyBatch(items: { id: string; title: string; snippet: string
                     event_city: { type: ["string", "null"], description: "Major city where the incident occurred. Use main city name, not neighborhoods." },
                     event_country: { type: ["string", "null"], description: "Country where the event occurred" },
                     event_key: { type: "string", description: "Canonical event identifier. Same real-world event = same key. Format: what-where-YYYYMMDD e.g. stabbing-london-20260501" },
+                    event_lat: { type: ["number", "null"], description: "Approximate latitude of the city where the event occurred. Use your knowledge of world geography. E.g. Orlando FL = 28.54, London = 51.51, Kyiv = 50.45" },
+                    event_lng: { type: ["number", "null"], description: "Approximate longitude of the city where the event occurred. E.g. Orlando FL = -81.38, London = -0.13, Kyiv = 30.52" },
                   },
-                  required: ["id", "type", "severity", "short_summary", "event_city", "event_country", "event_key"],
+                  required: ["id", "type", "severity", "short_summary", "event_city", "event_country", "event_key", "event_lat", "event_lng"],
                   additionalProperties: false,
                 },
               },
@@ -419,14 +421,16 @@ async function processDocApi(supabase: any): Promise<number> {
     if (!eventCity) continue; // Require specific city — no country-level pins
     const centroid = COUNTRY_CENTROIDS[eventCountry];
     if (!centroid) continue;
-    const jitter = () => (Math.random() - 0.5) * 1.5;
-    const lat = centroid[0] + jitter();
-    const lng = centroid[1] + jitter();
+    // Use AI-provided coordinates if available, otherwise fall back to country centroid
+    const aiLat = typeof cls.event_lat === "number" && isFinite(cls.event_lat) ? cls.event_lat : null;
+    const aiLng = typeof cls.event_lng === "number" && isFinite(cls.event_lng) ? cls.event_lng : null;
+    const jitter = () => (Math.random() - 0.5) * 0.15; // Small jitter to avoid exact overlap
+    const lat = (aiLat ?? centroid[0]) + jitter();
+    const lng = (aiLng ?? centroid[1]) + jitter();
     const occurred = parseSeenDate(c.seendate) ?? new Date().toISOString();
-    // Content hash based on AI-assigned event_key — same real-world event
-    // from different outlets gets the same key and collapses into one row.
     const eventKey = cls.event_key || `${cls.type}:${eventCity}:${eventCountry}`;
-    const content_hash = await makeContentHash(eventKey, centroid[0], centroid[1]);
+    // Use stable coords for hash (AI coords or centroid, no jitter)
+    const content_hash = await makeContentHash(eventKey, aiLat ?? centroid[0], aiLng ?? centroid[1]);
     rows.push({
       external_id: c.id,
       title: c.title || "Untitled incident",
