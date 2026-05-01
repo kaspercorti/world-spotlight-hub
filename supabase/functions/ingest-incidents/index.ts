@@ -421,14 +421,16 @@ async function processDocApi(supabase: any): Promise<number> {
     if (!eventCity) continue; // Require specific city — no country-level pins
     const centroid = COUNTRY_CENTROIDS[eventCountry];
     if (!centroid) continue;
-    const jitter = () => (Math.random() - 0.5) * 1.5;
-    const lat = centroid[0] + jitter();
-    const lng = centroid[1] + jitter();
+    // Use AI-provided coordinates if available, otherwise fall back to country centroid
+    const aiLat = typeof cls.event_lat === "number" && isFinite(cls.event_lat) ? cls.event_lat : null;
+    const aiLng = typeof cls.event_lng === "number" && isFinite(cls.event_lng) ? cls.event_lng : null;
+    const jitter = () => (Math.random() - 0.5) * 0.15; // Small jitter to avoid exact overlap
+    const lat = (aiLat ?? centroid[0]) + jitter();
+    const lng = (aiLng ?? centroid[1]) + jitter();
     const occurred = parseSeenDate(c.seendate) ?? new Date().toISOString();
-    // Content hash based on AI-assigned event_key — same real-world event
-    // from different outlets gets the same key and collapses into one row.
     const eventKey = cls.event_key || `${cls.type}:${eventCity}:${eventCountry}`;
-    const content_hash = await makeContentHash(eventKey, centroid[0], centroid[1]);
+    // Use stable coords for hash (AI coords or centroid, no jitter)
+    const content_hash = await makeContentHash(eventKey, aiLat ?? centroid[0], aiLng ?? centroid[1]);
     rows.push({
       external_id: c.id,
       title: c.title || "Untitled incident",
