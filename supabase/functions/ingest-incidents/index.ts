@@ -277,8 +277,9 @@ async function classifyBatch(items: { id: string; title: string; snippet: string
     "missing persons (unless confirmed kidnapping), drug seizures, routine police activity. " +
     "Allowed types: war, airstrike, explosion, shooting, terror, protest, civil, robbery, kidnapping, arson, cyber. " +
     "Severity scale: low, tension, active, war. Use 'war' only for active armed conflict between military forces. " +
-    "CRITICAL: 'event_city' MUST be the specific city/town/village where the incident physically occurred. If you cannot determine a specific city from the headline, set type to null — we do not want country-level incidents. " +
+    "CRITICAL: 'event_city' MUST be the MAJOR city where the incident physically occurred (use the main city name, NOT suburbs/neighborhoods like 'Golders Green' — use 'London' instead). If you cannot determine a specific city from the headline, set type to null. " +
     "CRITICAL: 'event_country' MUST be the country where the incident PHYSICALLY OCCURRED, NOT the news outlet's country. " +
+    "CRITICAL: 'event_key' is a SHORT canonical identifier for the unique real-world event. Multiple articles about the SAME event MUST produce the SAME event_key. Format: lowercase, no spaces, pattern: 'what-where-YYYYMMDD'. Examples: 'stabbing-london-20260501', 'bombing-kyiv-20260430', 'protest-paris-20260501'. If multiple headlines describe the same incident (e.g. 'Man charged after stabbing Jewish men in London' and 'UK police charge man for London stabbings'), they MUST get the same event_key. " +
     "Use official English country names from this list: United States, Mexico, Canada, United Kingdom, France, Germany, Sweden, Norway, Denmark, Finland, Russia, Ukraine, Poland, Israel, Palestine, Lebanon, Syria, Iraq, Iran, Yemen, Saudi Arabia, Egypt, Turkey, Sudan, South Sudan, Ethiopia, Somalia, Kenya, Nigeria, Mali, Burkina Faso, Niger, Libya, DR Congo, Congo, Cameroon, South Africa, Mozambique, India, Pakistan, Afghanistan, Bangladesh, Sri Lanka, Nepal, China, Japan, South Korea, North Korea, Taiwan, Philippines, Indonesia, Thailand, Vietnam, Myanmar, Malaysia, Australia, New Zealand, Brazil, Argentina, Colombia, Venezuela, Peru, Chile, Ecuador, Bolivia, Haiti, Italy, Spain, Greece, Belgium, Netherlands, Switzerland, Austria, Czech Republic, Hungary, Romania, Bulgaria, Serbia, Bosnia and Herzegovina, Kosovo. " +
     "If you cannot determine the country, set event_country to null.";
 
@@ -309,10 +310,11 @@ async function classifyBatch(items: { id: string; title: string; snippet: string
                     type: { type: ["string", "null"], enum: [...ALLOWED_TYPES, null] },
                     severity: { type: "string", enum: ["low", "tension", "active", "war"] },
                     short_summary: { type: "string" },
-                    event_city: { type: ["string", "null"], description: "Specific city/town where the incident occurred. REQUIRED for acceptance." },
+                    event_city: { type: ["string", "null"], description: "Major city where the incident occurred. Use main city name, not neighborhoods." },
                     event_country: { type: ["string", "null"], description: "Country where the event occurred" },
+                    event_key: { type: "string", description: "Canonical event identifier. Same real-world event = same key. Format: what-where-YYYYMMDD e.g. stabbing-london-20260501" },
                   },
-                  required: ["id", "type", "severity", "short_summary", "event_city", "event_country"],
+                  required: ["id", "type", "severity", "short_summary", "event_city", "event_country", "event_key"],
                   additionalProperties: false,
                 },
               },
@@ -421,9 +423,10 @@ async function processDocApi(supabase: any): Promise<number> {
     const lat = centroid[0] + jitter();
     const lng = centroid[1] + jitter();
     const occurred = parseSeenDate(c.seendate) ?? new Date().toISOString();
-    // Content hash based on type + city + country (NOT jittered coords) so same
-    // incident from different outlets collapses into one row.
-    const content_hash = await makeContentHash(`${cls.type}:${eventCity}:${eventCountry}`, centroid[0], centroid[1]);
+    // Content hash based on AI-assigned event_key — same real-world event
+    // from different outlets gets the same key and collapses into one row.
+    const eventKey = cls.event_key || `${cls.type}:${eventCity}:${eventCountry}`;
+    const content_hash = await makeContentHash(eventKey, centroid[0], centroid[1]);
     rows.push({
       external_id: c.id,
       title: c.title || "Untitled incident",
