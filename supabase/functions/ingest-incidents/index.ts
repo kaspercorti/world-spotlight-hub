@@ -413,13 +413,17 @@ async function processDocApi(supabase: any): Promise<number> {
     if (!ALLOWED_TYPES.includes(cls.type)) continue;
     const eventCountry: string | null = cls.event_country ?? null;
     if (!eventCountry) continue;
+    const eventCity: string | null = cls.event_city ?? null;
+    if (!eventCity) continue; // Require specific city — no country-level pins
     const centroid = COUNTRY_CENTROIDS[eventCountry];
     if (!centroid) continue;
     const jitter = () => (Math.random() - 0.5) * 1.5;
     const lat = centroid[0] + jitter();
     const lng = centroid[1] + jitter();
     const occurred = parseSeenDate(c.seendate) ?? new Date().toISOString();
-    const content_hash = await makeContentHash(c.title, lat, lng);
+    // Content hash based on type + city + country (NOT jittered coords) so same
+    // incident from different outlets collapses into one row.
+    const content_hash = await makeContentHash(`${cls.type}:${eventCity}:${eventCountry}`, centroid[0], centroid[1]);
     rows.push({
       external_id: c.id,
       title: c.title || "Untitled incident",
@@ -428,7 +432,7 @@ async function processDocApi(supabase: any): Promise<number> {
       severity: cls.severity ?? "tension",
       lat,
       lng,
-      location: cls.location ?? eventCountry,
+      location: eventCity,
       country: eventCountry,
       source: c.domain ?? "GDELT",
       source_url: c.url ?? null,
