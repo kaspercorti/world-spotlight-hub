@@ -269,13 +269,18 @@ async function unzipFirstFile(buf: Uint8Array): Promise<string | null> {
 async function classifyBatch(items: { id: string; title: string; snippet: string; country?: string }[]) {
   if (items.length === 0) return [];
   const sys =
-    "You classify real-world incident headlines into a strict taxonomy. Return only valid tool calls. " +
+    "You classify real-world incident headlines. ONLY include events where physical violence, destruction, or a direct physical threat occurred or is actively occurring RIGHT NOW. " +
+    "REJECT (set type to null) ALL of the following: court cases, trials, sentencing, legal proceedings, lawsuits, indictments, convictions, executions by the state, arrests (unless during an active violent event), " +
+    "political debates, legislation, policy changes, opinion pieces, editorials, retrospectives, anniversaries, memorials, " +
+    "accidents (car crashes, fires without arson, natural disasters), sports, entertainment, celebrity news, " +
+    "cybersecurity vulnerabilities/patches (only actual attacks with real damage count as 'cyber'), " +
+    "missing persons (unless confirmed kidnapping), drug seizures, routine police activity. " +
     "Allowed types: war, airstrike, explosion, shooting, terror, protest, civil, robbery, kidnapping, arson, cyber. " +
-    "Severity scale: low, tension, active, war. Use 'war' only for active armed conflict. " +
-    "Reject items that are not actual incidents (opinion pieces, history, anniversaries, retrospectives, sports, entertainment) by setting type to null. " +
-    "CRITICAL: 'event_country' MUST be the country where the incident PHYSICALLY OCCURRED (extracted from the headline), NOT the country of the news outlet. " +
-    "Use the official English country name matching this list exactly when applicable: United States, Mexico, Canada, United Kingdom, France, Germany, Sweden, Norway, Denmark, Finland, Russia, Ukraine, Poland, Israel, Palestine, Lebanon, Syria, Iraq, Iran, Yemen, Saudi Arabia, Egypt, Turkey, Sudan, South Sudan, Ethiopia, Somalia, Kenya, Nigeria, Mali, Burkina Faso, Niger, Libya, DR Congo, Congo, Cameroon, South Africa, Mozambique, India, Pakistan, Afghanistan, Bangladesh, Sri Lanka, Nepal, China, Japan, South Korea, North Korea, Taiwan, Philippines, Indonesia, Thailand, Vietnam, Myanmar, Malaysia, Australia, New Zealand, Brazil, Argentina, Colombia, Venezuela, Peru, Chile, Ecuador, Bolivia, Haiti, Italy, Spain, Greece, Belgium, Netherlands, Switzerland, Austria, Czech Republic, Hungary, Romania, Bulgaria, Serbia, Bosnia and Herzegovina, Kosovo. " +
-    "If the headline does not clearly identify a country of occurrence, set event_country to null and the item will be discarded.";
+    "Severity scale: low, tension, active, war. Use 'war' only for active armed conflict between military forces. " +
+    "CRITICAL: 'event_city' MUST be the specific city/town/village where the incident physically occurred. If you cannot determine a specific city from the headline, set type to null — we do not want country-level incidents. " +
+    "CRITICAL: 'event_country' MUST be the country where the incident PHYSICALLY OCCURRED, NOT the news outlet's country. " +
+    "Use official English country names from this list: United States, Mexico, Canada, United Kingdom, France, Germany, Sweden, Norway, Denmark, Finland, Russia, Ukraine, Poland, Israel, Palestine, Lebanon, Syria, Iraq, Iran, Yemen, Saudi Arabia, Egypt, Turkey, Sudan, South Sudan, Ethiopia, Somalia, Kenya, Nigeria, Mali, Burkina Faso, Niger, Libya, DR Congo, Congo, Cameroon, South Africa, Mozambique, India, Pakistan, Afghanistan, Bangladesh, Sri Lanka, Nepal, China, Japan, South Korea, North Korea, Taiwan, Philippines, Indonesia, Thailand, Vietnam, Myanmar, Malaysia, Australia, New Zealand, Brazil, Argentina, Colombia, Venezuela, Peru, Chile, Ecuador, Bolivia, Haiti, Italy, Spain, Greece, Belgium, Netherlands, Switzerland, Austria, Czech Republic, Hungary, Romania, Bulgaria, Serbia, Bosnia and Herzegovina, Kosovo. " +
+    "If you cannot determine the country, set event_country to null.";
 
   const user = JSON.stringify(items);
   const resp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
@@ -304,10 +309,10 @@ async function classifyBatch(items: { id: string; title: string; snippet: string
                     type: { type: ["string", "null"], enum: [...ALLOWED_TYPES, null] },
                     severity: { type: "string", enum: ["low", "tension", "active", "war"] },
                     short_summary: { type: "string" },
-                    location: { type: ["string", "null"], description: "City or specific place" },
+                    event_city: { type: ["string", "null"], description: "Specific city/town where the incident occurred. REQUIRED for acceptance." },
                     event_country: { type: ["string", "null"], description: "Country where the event occurred" },
                   },
-                  required: ["id", "type", "severity", "short_summary", "event_country"],
+                  required: ["id", "type", "severity", "short_summary", "event_city", "event_country"],
                   additionalProperties: false,
                 },
               },
@@ -408,13 +413,17 @@ async function processDocApi(supabase: any): Promise<number> {
     if (!ALLOWED_TYPES.includes(cls.type)) continue;
     const eventCountry: string | null = cls.event_country ?? null;
     if (!eventCountry) continue;
+    const eventCity: string | null = cls.event_city ?? null;
+    if (!eventCity) continue; // Require specific city — no country-level pins
     const centroid = COUNTRY_CENTROIDS[eventCountry];
     if (!centroid) continue;
     const jitter = () => (Math.random() - 0.5) * 1.5;
     const lat = centroid[0] + jitter();
     const lng = centroid[1] + jitter();
     const occurred = parseSeenDate(c.seendate) ?? new Date().toISOString();
-    const content_hash = await makeContentHash(c.title, lat, lng);
+    // Content hash based on type + city + country (NOT jittered coords) so same
+    // incident from different outlets collapses into one row.
+    const content_hash = await makeContentHash(`${cls.type}:${eventCity}:${eventCountry}`, centroid[0], centroid[1]);
     rows.push({
       external_id: c.id,
       title: c.title || "Untitled incident",
@@ -423,7 +432,7 @@ async function processDocApi(supabase: any): Promise<number> {
       severity: cls.severity ?? "tension",
       lat,
       lng,
-      location: cls.location ?? eventCountry,
+      location: eventCity,
       country: eventCountry,
       source: c.domain ?? "GDELT",
       source_url: c.url ?? null,
