@@ -14,6 +14,38 @@ export type Database = {
   }
   public: {
     Tables: {
+      incident_sources: {
+        Row: {
+          created_at: string
+          id: string
+          incident_id: string
+          source_name: string | null
+          source_url: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          incident_id: string
+          source_name?: string | null
+          source_url: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          incident_id?: string
+          source_name?: string | null
+          source_url?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "incident_sources_incident_id_fkey"
+            columns: ["incident_id"]
+            isOneToOne: false
+            referencedRelation: "incidents"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       incidents: {
         Row: {
           content_hash: string | null
