@@ -423,9 +423,10 @@ async function processDocApi(supabase: any): Promise<number> {
     const lat = centroid[0] + jitter();
     const lng = centroid[1] + jitter();
     const occurred = parseSeenDate(c.seendate) ?? new Date().toISOString();
-    // Content hash based on type + city + country (NOT jittered coords) so same
-    // incident from different outlets collapses into one row.
-    const content_hash = await makeContentHash(`${cls.type}:${eventCity}:${eventCountry}`, centroid[0], centroid[1]);
+    // Content hash based on AI-assigned event_key — same real-world event
+    // from different outlets gets the same key and collapses into one row.
+    const eventKey = cls.event_key || `${cls.type}:${eventCity}:${eventCountry}`;
+    const content_hash = await makeContentHash(eventKey, centroid[0], centroid[1]);
     rows.push({
       external_id: c.id,
       title: c.title || "Untitled incident",
