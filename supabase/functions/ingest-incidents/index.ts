@@ -269,13 +269,18 @@ async function unzipFirstFile(buf: Uint8Array): Promise<string | null> {
 async function classifyBatch(items: { id: string; title: string; snippet: string; country?: string }[]) {
   if (items.length === 0) return [];
   const sys =
-    "You classify real-world incident headlines into a strict taxonomy. Return only valid tool calls. " +
+    "You classify real-world incident headlines. ONLY include events where physical violence, destruction, or a direct physical threat occurred or is actively occurring RIGHT NOW. " +
+    "REJECT (set type to null) ALL of the following: court cases, trials, sentencing, legal proceedings, lawsuits, indictments, convictions, executions by the state, arrests (unless during an active violent event), " +
+    "political debates, legislation, policy changes, opinion pieces, editorials, retrospectives, anniversaries, memorials, " +
+    "accidents (car crashes, fires without arson, natural disasters), sports, entertainment, celebrity news, " +
+    "cybersecurity vulnerabilities/patches (only actual attacks with real damage count as 'cyber'), " +
+    "missing persons (unless confirmed kidnapping), drug seizures, routine police activity. " +
     "Allowed types: war, airstrike, explosion, shooting, terror, protest, civil, robbery, kidnapping, arson, cyber. " +
-    "Severity scale: low, tension, active, war. Use 'war' only for active armed conflict. " +
-    "Reject items that are not actual incidents (opinion pieces, history, anniversaries, retrospectives, sports, entertainment) by setting type to null. " +
-    "CRITICAL: 'event_country' MUST be the country where the incident PHYSICALLY OCCURRED (extracted from the headline), NOT the country of the news outlet. " +
-    "Use the official English country name matching this list exactly when applicable: United States, Mexico, Canada, United Kingdom, France, Germany, Sweden, Norway, Denmark, Finland, Russia, Ukraine, Poland, Israel, Palestine, Lebanon, Syria, Iraq, Iran, Yemen, Saudi Arabia, Egypt, Turkey, Sudan, South Sudan, Ethiopia, Somalia, Kenya, Nigeria, Mali, Burkina Faso, Niger, Libya, DR Congo, Congo, Cameroon, South Africa, Mozambique, India, Pakistan, Afghanistan, Bangladesh, Sri Lanka, Nepal, China, Japan, South Korea, North Korea, Taiwan, Philippines, Indonesia, Thailand, Vietnam, Myanmar, Malaysia, Australia, New Zealand, Brazil, Argentina, Colombia, Venezuela, Peru, Chile, Ecuador, Bolivia, Haiti, Italy, Spain, Greece, Belgium, Netherlands, Switzerland, Austria, Czech Republic, Hungary, Romania, Bulgaria, Serbia, Bosnia and Herzegovina, Kosovo. " +
-    "If the headline does not clearly identify a country of occurrence, set event_country to null and the item will be discarded.";
+    "Severity scale: low, tension, active, war. Use 'war' only for active armed conflict between military forces. " +
+    "CRITICAL: 'event_city' MUST be the specific city/town/village where the incident physically occurred. If you cannot determine a specific city from the headline, set type to null — we do not want country-level incidents. " +
+    "CRITICAL: 'event_country' MUST be the country where the incident PHYSICALLY OCCURRED, NOT the news outlet's country. " +
+    "Use official English country names from this list: United States, Mexico, Canada, United Kingdom, France, Germany, Sweden, Norway, Denmark, Finland, Russia, Ukraine, Poland, Israel, Palestine, Lebanon, Syria, Iraq, Iran, Yemen, Saudi Arabia, Egypt, Turkey, Sudan, South Sudan, Ethiopia, Somalia, Kenya, Nigeria, Mali, Burkina Faso, Niger, Libya, DR Congo, Congo, Cameroon, South Africa, Mozambique, India, Pakistan, Afghanistan, Bangladesh, Sri Lanka, Nepal, China, Japan, South Korea, North Korea, Taiwan, Philippines, Indonesia, Thailand, Vietnam, Myanmar, Malaysia, Australia, New Zealand, Brazil, Argentina, Colombia, Venezuela, Peru, Chile, Ecuador, Bolivia, Haiti, Italy, Spain, Greece, Belgium, Netherlands, Switzerland, Austria, Czech Republic, Hungary, Romania, Bulgaria, Serbia, Bosnia and Herzegovina, Kosovo. " +
+    "If you cannot determine the country, set event_country to null.";
 
   const user = JSON.stringify(items);
   const resp = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
