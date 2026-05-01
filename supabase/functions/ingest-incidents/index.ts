@@ -442,15 +442,40 @@ async function processDocApi(supabase: any): Promise<number> {
   }
 
   if (rows.length === 0) return 0;
-  // Dedup within batch on content_hash
-  const seen = new Set<string>();
-  const uniqueRows = rows.filter((r) => {
-    if (seen.has(r.content_hash)) return false;
-    seen.add(r.content_hash);
-    return true;
-  });
-  const { error } = await supabase.from("incidents").upsert(uniqueRows, { onConflict: "content_hash", ignoreDuplicates: true });
+  // Dedup within batch on content_hash — keep first, collect extra sources
+  const seen = new Map<string, NormalizedIncident>();
+  const extraSources: { content_hash: string; source_name: string | null; source_url: string }[] = [];
+  for (const r of rows) {
+    if (!seen.has(r.content_hash)) {
+      seen.set(r.content_hash, r);
+    } else if (r.source_url) {
+      extraSources.push({ content_hash: r.content_hash, source_name: r.source, source_url: r.source_url });
+    }
+  }
+  const uniqueRows = Array.from(seen.values());
+  const { error, data: upserted } = await supabase.from("incidents").upsert(uniqueRows, { onConflict: "content_hash", ignoreDuplicates: false }).select("id, content_hash, source, source_url");
   if (error) { console.error("Doc insert failed:", error); return 0; }
+
+  // Insert sources into incident_sources table
+  if (upserted && upserted.length > 0) {
+    const hashToId = new Map<string, string>();
+    for (const row of upserted) hashToId.set(row.content_hash, row.id);
+
+    const sourcesToInsert: { incident_id: string; source_name: string | null; source_url: string }[] = [];
+    // Primary sources from upserted rows
+    for (const row of upserted) {
+      if (row.source_url) sourcesToInsert.push({ incident_id: row.id, source_name: row.source, source_url: row.source_url });
+    }
+    // Extra sources from duplicate rows
+    for (const es of extraSources) {
+      const incId = hashToId.get(es.content_hash);
+      if (incId) sourcesToInsert.push({ incident_id: incId, source_name: es.source_name, source_url: es.source_url });
+    }
+    if (sourcesToInsert.length > 0) {
+      const { error: srcErr } = await supabase.from("incident_sources").upsert(sourcesToInsert, { onConflict: "incident_id,source_url", ignoreDuplicates: true });
+      if (srcErr) console.error("Source insert failed:", srcErr);
+    }
+  }
   return uniqueRows.length;
 }
 
@@ -478,9 +503,19 @@ async function processEvents(supabase: any): Promise<number> {
   let inserted = 0;
   for (let i = 0; i < fresh.length; i += 200) {
     const batch = fresh.slice(i, i + 200);
-    const { error } = await supabase.from("incidents").upsert(batch, { onConflict: "content_hash", ignoreDuplicates: true });
+    const { error, data: upserted } = await supabase.from("incidents").upsert(batch, { onConflict: "content_hash", ignoreDuplicates: false }).select("id, source, source_url");
     if (error) { console.error("Events insert failed:", error); break; }
     inserted += batch.length;
+    // Store sources
+    if (upserted && upserted.length > 0) {
+      const sources = upserted.filter((r: any) => r.source_url).map((r: any) => ({
+        incident_id: r.id, source_name: r.source, source_url: r.source_url,
+      }));
+      if (sources.length > 0) {
+        const { error: srcErr } = await supabase.from("incident_sources").upsert(sources, { onConflict: "incident_id,source_url", ignoreDuplicates: true });
+        if (srcErr) console.error("Events source insert failed:", srcErr);
+      }
+    }
   }
   return inserted;
 }
