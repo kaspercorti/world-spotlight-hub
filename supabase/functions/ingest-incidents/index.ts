@@ -126,142 +126,8 @@ function parseSeenDate(s: string): string | null {
 // Each row is the latest 15-min export of CAMEO events with lat/lng.
 // =====================================================================
 
-// Strict CAMEO -> our taxonomy. Only specific violent sub-codes, not entire roots, to filter noise.
-function cameoToType(eventCode: string): { type: IncidentType; severity: Severity } | null {
-  if (!eventCode) return null;
-  const c = eventCode;
-  // 145* = riot / violent demonstration
-  if (c.startsWith("145")) return { type: "protest", severity: "active" };
-  // NOTE: 173* (arrest/detain) deliberately EXCLUDED — too noisy (every drink-driving arrest matched).
-  // 175 = use tactics of violent repression
-  if (c.startsWith("175")) return { type: "shooting", severity: "active" };
-  // 18* ASSAULT (physical)
-  if (c === "180" || c === "181" || c.startsWith("181")) return { type: "shooting", severity: "active" };
-  if (c === "182" || c.startsWith("182")) return { type: "kidnapping", severity: "active" };
-  if (c === "183" || c.startsWith("183")) return { type: "explosion", severity: "active" };
-  if (c === "184" || c.startsWith("184")) return { type: "shooting", severity: "active" };
-  if (c === "185" || c.startsWith("185")) return { type: "airstrike", severity: "war" };
-  if (c === "186" || c.startsWith("186")) return { type: "kidnapping", severity: "active" };
-  // 19* FIGHT — only actual combat sub-codes (skip 190/191/192 which are threats)
-  if (c === "193" || c.startsWith("193")) return { type: "shooting", severity: "active" };
-  if (c === "194" || c.startsWith("194")) return { type: "explosion", severity: "active" };
-  if (c === "195" || c.startsWith("195")) return { type: "war", severity: "war" };
-  if (c === "196" || c.startsWith("196")) return { type: "war", severity: "war" };
-  // 20* MASS VIOLENCE
-  if (c.startsWith("201") || c.startsWith("202") || c.startsWith("203")) return { type: "terror", severity: "war" };
-  if (c.startsWith("204")) return { type: "war", severity: "war" };
-  return null;
-}
-
-async function fetchGdeltEvents(): Promise<NormalizedIncident[]> {
-  try {
-    // Get the latest export filename
-    const lu = await fetch("http://data.gdeltproject.org/gdeltv2/lastupdate.txt");
-    if (!lu.ok) { console.error("Events lastupdate failed", lu.status); return []; }
-    const luText = await lu.text();
-    // First line points to the export.CSV.zip; we want the .export.CSV.zip URL
-    const exportLine = luText.split("\n").find((l) => l.includes(".export.CSV.zip"));
-    if (!exportLine) { console.error("No export line in lastupdate"); return []; }
-    const url = exportLine.trim().split(/\s+/).pop();
-    if (!url) return [];
-
-    // Use Deno's gunzip via DecompressionStream — but the file is .zip not .gz.
-    // We instead fetch the .CSV (uncompressed) endpoint by transforming URL? GDELT
-    // only serves zipped exports. We use a proxy-free approach: fetch zip and unzip.
-    const zipRes = await fetch(url);
-    if (!zipRes.ok) { console.error("Events zip fetch failed", zipRes.status); return []; }
-    const zipBuf = new Uint8Array(await zipRes.arrayBuffer());
-
-    // Minimal ZIP reader: locate first file, inflate raw deflate stream.
-    const csv = await unzipFirstFile(zipBuf);
-    if (!csv) { console.error("Failed to unzip GDELT events"); return []; }
-
-    // GDELT Events 2.0 column indexes (0-based) — we need a few:
-    // 0 GLOBALEVENTID, 1 SQLDATE, 26 EventCode, 31 NumMentions, 33 GoldsteinScale,
-    // 51 ActionGeo_Type, 52 ActionGeo_FullName, 53 ActionGeo_CountryCode,
-    // 56 ActionGeo_Lat, 57 ActionGeo_Long, 60 SOURCEURL, 59 DATEADDED
-    const lines = csv.split("\n");
-    const out: NormalizedIncident[] = [];
-    for (const line of lines) {
-      if (!line) continue;
-      const cols = line.split("\t");
-      if (cols.length < 61) continue;
-      const eventId = cols[0];
-      const eventCode = cols[26];
-      const cls = cameoToType(eventCode);
-      if (!cls) continue;
-      const lat = parseFloat(cols[56]);
-      const lng = parseFloat(cols[57]);
-      if (!isFinite(lat) || !isFinite(lng) || (lat === 0 && lng === 0)) continue;
-      const fullName = cols[52] || cols[53] || "Unknown location";
-      const sourceUrl = cols[60] || null;
-      const dateAdded = cols[59]; // YYYYMMDDHHMMSS
-      let occurred = new Date().toISOString();
-      if (/^\d{14}$/.test(dateAdded)) {
-        const d = dateAdded;
-        occurred = `${d.slice(0,4)}-${d.slice(4,6)}-${d.slice(6,8)}T${d.slice(8,10)}:${d.slice(10,12)}:${d.slice(12,14)}Z`;
-      }
-      const country = cols[53] || null; // FIPS country code
-
-      // Title: human-readable label per type + location. URL slugs were misleading
-      // (one article triggers many CAMEO events with different types).
-      const TYPE_LABELS: Record<IncidentType, string> = {
-        war: "Armed conflict", airstrike: "Airstrike", explosion: "Bombing/explosion",
-        shooting: "Armed assault", terror: "Mass violence / terror", protest: "Violent protest",
-        civil: "Civil unrest", robbery: "Robbery", kidnapping: "Abduction",
-        arson: "Arson", cyber: "Cyber attack",
-      };
-      const title = `${TYPE_LABELS[cls.type]} — ${fullName}`;
-
-      const content_hash = await makeContentHash(`${cls.type}:${fullName}`, lat, lng);
-      out.push({
-        external_id: `gdelt-evt-${eventId}`,
-        title: title.slice(0, 200),
-        summary: `Reported event near ${fullName}. Auto-classified from GDELT (CAMEO ${eventCode}).`,
-        type: cls.type,
-        severity: cls.severity,
-        lat,
-        lng,
-        location: fullName,
-        country,
-        source: sourceUrl ? new URL(sourceUrl).hostname.replace(/^www\./, "") : "GDELT",
-        source_url: sourceUrl,
-        occurred_at: occurred,
-        content_hash,
-      });
-    }
-    return out;
-  } catch (e) {
-    console.error("GDELT Events error", e instanceof Error ? e.message : e);
-    return [];
-  }
-}
-
-// Minimal ZIP reader: parse local file header, inflate raw deflate.
-async function unzipFirstFile(buf: Uint8Array): Promise<string | null> {
-  // Local file header signature: 0x04034b50 (little-endian)
-  if (buf.length < 30) return null;
-  const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
-  const sig = view.getUint32(0, true);
-  if (sig !== 0x04034b50) return null;
-  const compressionMethod = view.getUint16(8, true);
-  const compressedSize = view.getUint32(18, true);
-  const fileNameLength = view.getUint16(26, true);
-  const extraLength = view.getUint16(28, true);
-  const dataStart = 30 + fileNameLength + extraLength;
-  const compressed = buf.subarray(dataStart, dataStart + compressedSize);
-  if (compressionMethod === 0) {
-    return new TextDecoder("latin1").decode(compressed);
-  }
-  if (compressionMethod !== 8) {
-    console.error("Unsupported zip compression", compressionMethod);
-    return null;
-  }
-  // Use DecompressionStream("deflate-raw")
-  const stream = new Blob([compressed]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
-  const ab = await new Response(stream).arrayBuffer();
-  return new TextDecoder("latin1").decode(new Uint8Array(ab));
-}
+// GDELT Events 2.0 removed — CAMEO codes were too unreliable (wrong classifications, unrelated articles).
+// All incident classification now goes through Doc API + AI.
 
 // =====================================================================
 // AI classification for Doc API articles
@@ -486,47 +352,6 @@ async function processDocApi(supabase: any): Promise<number> {
   return uniqueRows.length;
 }
 
-async function processEvents(supabase: any): Promise<number> {
-  const events = await fetchGdeltEvents();
-  console.log(`GDELT Events parsed: ${events.length}`);
-  if (events.length === 0) return 0;
-
-  // Dedup within the batch on content_hash first.
-  const seenHash = new Set<string>();
-  const inBatchUnique = events.filter((e) => {
-    if (seenHash.has(e.content_hash)) return false;
-    seenHash.add(e.content_hash);
-    return true;
-  });
-  console.log(`Events unique in batch: ${inBatchUnique.length}`);
-
-  const hashes = inBatchUnique.map((e) => e.content_hash);
-  const { data: existing } = await supabase.from("incidents").select("content_hash").in("content_hash", hashes);
-  const existingSet = new Set((existing ?? []).map((r: any) => r.content_hash));
-  const fresh = inBatchUnique.filter((e) => !existingSet.has(e.content_hash));
-  console.log(`Events fresh after DB dedup: ${fresh.length}`);
-  if (fresh.length === 0) return 0;
-
-  let inserted = 0;
-  for (let i = 0; i < fresh.length; i += 200) {
-    const batch = fresh.slice(i, i + 200);
-    const { error, data: upserted } = await supabase.from("incidents").upsert(batch, { onConflict: "content_hash", ignoreDuplicates: false }).select("id, source, source_url");
-    if (error) { console.error("Events insert failed:", error); break; }
-    inserted += batch.length;
-    // Store sources
-    if (upserted && upserted.length > 0) {
-      const sources = upserted.filter((r: any) => r.source_url).map((r: any) => ({
-        incident_id: r.id, source_name: r.source, source_url: r.source_url,
-      }));
-      if (sources.length > 0) {
-        const { error: srcErr } = await supabase.from("incident_sources").upsert(sources, { onConflict: "incident_id,source_url", ignoreDuplicates: true });
-        if (srcErr) console.error("Events source insert failed:", srcErr);
-      }
-    }
-  }
-  return inserted;
-}
-
 // =====================================================================
 // Main handler
 // =====================================================================
@@ -535,20 +360,15 @@ Deno.serve(async (req) => {
 
   const supabase = createClient(SUPABASE_URL, SERVICE_ROLE);
 
-  // Run both pipelines in background so we can return quickly.
   const job = (async () => {
     try {
-      const [eventsCount, docCount] = await Promise.all([
-        processEvents(supabase).catch((e) => { console.error("events pipeline error", e); return 0; }),
-        processDocApi(supabase).catch((e) => { console.error("doc pipeline error", e); return 0; }),
-      ]);
-      console.log(`Ingest complete: events=${eventsCount}, doc=${docCount}`);
+      const docCount = await processDocApi(supabase).catch((e) => { console.error("doc pipeline error", e); return 0; });
+      console.log(`Ingest complete: doc=${docCount}`);
     } catch (e) {
       console.error("Background ingest error:", e);
     }
   })();
 
-  // Keep the function alive until the background work finishes.
   // @ts-ignore EdgeRuntime is provided by Supabase Edge runtime.
   if (typeof EdgeRuntime !== "undefined" && EdgeRuntime.waitUntil) {
     // @ts-ignore
