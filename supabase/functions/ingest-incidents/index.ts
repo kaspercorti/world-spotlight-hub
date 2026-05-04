@@ -352,47 +352,6 @@ async function processDocApi(supabase: any): Promise<number> {
   return uniqueRows.length;
 }
 
-async function processEvents(supabase: any): Promise<number> {
-  const events = await fetchGdeltEvents();
-  console.log(`GDELT Events parsed: ${events.length}`);
-  if (events.length === 0) return 0;
-
-  // Dedup within the batch on content_hash first.
-  const seenHash = new Set<string>();
-  const inBatchUnique = events.filter((e) => {
-    if (seenHash.has(e.content_hash)) return false;
-    seenHash.add(e.content_hash);
-    return true;
-  });
-  console.log(`Events unique in batch: ${inBatchUnique.length}`);
-
-  const hashes = inBatchUnique.map((e) => e.content_hash);
-  const { data: existing } = await supabase.from("incidents").select("content_hash").in("content_hash", hashes);
-  const existingSet = new Set((existing ?? []).map((r: any) => r.content_hash));
-  const fresh = inBatchUnique.filter((e) => !existingSet.has(e.content_hash));
-  console.log(`Events fresh after DB dedup: ${fresh.length}`);
-  if (fresh.length === 0) return 0;
-
-  let inserted = 0;
-  for (let i = 0; i < fresh.length; i += 200) {
-    const batch = fresh.slice(i, i + 200);
-    const { error, data: upserted } = await supabase.from("incidents").upsert(batch, { onConflict: "content_hash", ignoreDuplicates: false }).select("id, source, source_url");
-    if (error) { console.error("Events insert failed:", error); break; }
-    inserted += batch.length;
-    // Store sources
-    if (upserted && upserted.length > 0) {
-      const sources = upserted.filter((r: any) => r.source_url).map((r: any) => ({
-        incident_id: r.id, source_name: r.source, source_url: r.source_url,
-      }));
-      if (sources.length > 0) {
-        const { error: srcErr } = await supabase.from("incident_sources").upsert(sources, { onConflict: "incident_id,source_url", ignoreDuplicates: true });
-        if (srcErr) console.error("Events source insert failed:", srcErr);
-      }
-    }
-  }
-  return inserted;
-}
-
 // =====================================================================
 // Main handler
 // =====================================================================
@@ -401,20 +360,15 @@ Deno.serve(async (req) => {
 
   const supabase = createClient(SUPABASE_URL, SERVICE_ROLE);
 
-  // Run both pipelines in background so we can return quickly.
   const job = (async () => {
     try {
-      const [eventsCount, docCount] = await Promise.all([
-        processEvents(supabase).catch((e) => { console.error("events pipeline error", e); return 0; }),
-        processDocApi(supabase).catch((e) => { console.error("doc pipeline error", e); return 0; }),
-      ]);
-      console.log(`Ingest complete: events=${eventsCount}, doc=${docCount}`);
+      const docCount = await processDocApi(supabase).catch((e) => { console.error("doc pipeline error", e); return 0; });
+      console.log(`Ingest complete: doc=${docCount}`);
     } catch (e) {
       console.error("Background ingest error:", e);
     }
   })();
 
-  // Keep the function alive until the background work finishes.
   // @ts-ignore EdgeRuntime is provided by Supabase Edge runtime.
   if (typeof EdgeRuntime !== "undefined" && EdgeRuntime.waitUntil) {
     // @ts-ignore
