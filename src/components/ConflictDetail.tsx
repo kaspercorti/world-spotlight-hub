@@ -38,7 +38,13 @@ export function ConflictDetail({
   }, [incident.id, incident.source, incident.source_url]);
 
   return (
-    <aside className="pointer-events-auto absolute right-0 top-0 z-[1001] flex h-full w-full max-w-md flex-col border-l border-border bg-gradient-panel backdrop-blur-xl shadow-panel animate-slide-in-right">
+    <aside
+      className="pointer-events-auto absolute right-0 top-0 z-[1001] flex h-full w-full max-w-md flex-col border-l border-border bg-gradient-panel backdrop-blur-xl shadow-panel animate-slide-in-right"
+      style={{
+        paddingTop: "env(safe-area-inset-top)",
+        paddingBottom: "env(safe-area-inset-bottom)",
+      }}
+    >
       <div className="flex items-start justify-between gap-3 border-b border-border p-5">
         <div className="min-w-0">
           <div className="mb-2 flex items-center gap-2">
