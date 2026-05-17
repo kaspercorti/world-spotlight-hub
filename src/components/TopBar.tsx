@@ -9,7 +9,14 @@ interface Props {
 
 export function TopBar({ totalIncidents, highSeverityCount, lastUpdated }: Props) {
   return (
-    <header className="pointer-events-none absolute left-0 right-0 top-0 z-[1000] flex items-start justify-between p-4">
+    <header
+      className="pointer-events-none absolute left-0 right-0 top-0 z-[1000] flex items-start justify-between p-4"
+      style={{
+        paddingTop: "calc(env(safe-area-inset-top) + 1rem)",
+        paddingLeft: "calc(env(safe-area-inset-left) + 1rem)",
+        paddingRight: "calc(env(safe-area-inset-right) + 1rem)",
+      }}
+    >
       <div className="pointer-events-auto flex items-center gap-3 rounded-md border border-border bg-card/80 px-4 py-2.5 backdrop-blur-md shadow-panel">
         <div className="relative h-7 w-7">
           <div className="radar-sweep absolute inset-0 rounded-full border border-accent/40" />
