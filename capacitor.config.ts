@@ -1,7 +1,7 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'app.lovable.3600c37176534800bbf344ca5606b62c',
+  appId: 'com.maptension.app',
   appName: 'maptension',
   webDir: 'dist',
   server: {
